@@ -2,7 +2,7 @@
 name = "tempfile"
 description = "Automatically deleted async I/O temporary files."
 license = "MIT"
-authors = ["Markus Mayer <widemeadows@gmail.com>"]
+authors = ["Markus Mayer"]
 repository = "git@github.com:sunsided/tempfile-rs.git"
 version = "0.1.0"
 edition = "2021"
