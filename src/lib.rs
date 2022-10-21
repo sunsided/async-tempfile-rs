@@ -42,7 +42,8 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// let file = tempfile::TempFile::new();
+    /// # use tempfile::TempFile;
+    /// let file = TempFile::new();
     ///
     /// // Deletes the file.
     /// drop(file);
@@ -61,7 +62,8 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// let file = tempfile::TempFile::new_in(std::env::temp_dir());
+    /// # use tempfile::TempFile;
+    /// let file = TempFile::new_in(std::env::temp_dir());
     ///
     /// // Deletes the file.
     /// drop(file);
