@@ -1,0 +1,10 @@
+[package]
+name = "tempfile"
+authors = ["Markus Mayer <widemeadows@gmail.com>"]
+repository = "git@github.com:sunsided/tempfile-rs.git"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.18.0", features = ["full"] }
+uuid = { version = "1.0.0", features = ["v4"] }
