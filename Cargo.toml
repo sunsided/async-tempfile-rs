@@ -8,5 +8,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.18.0", features = ["full"] }
-uuid = { version = "1.0.0", features = ["v4"] }
+tokio = { version = "1.21.2", features = ["fs"] }
+uuid = { version = "1.2.1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros"] }
