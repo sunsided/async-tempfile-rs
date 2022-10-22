@@ -1,10 +1,10 @@
 [package]
-name = "tempfile"
+name = "async-tempfile"
 version = "0.1.0"
 description = "Automatically deleted async I/O temporary files."
 license = "MIT"
 authors = ["Markus Mayer"]
-repository = "git@github.com:sunsided/tempfile-rs.git"
+repository = "https://github.com/sunsided/tempfile-rs"
 keywords = ["tokio", "temporary-files", "temp"]
 categories = ["asynchronous", "filesystem"]
 edition = "2021"
