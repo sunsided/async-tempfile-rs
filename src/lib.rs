@@ -29,7 +29,7 @@ pub struct TempFile {
 }
 
 /// Determines the ownership of a temporary file.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Ownership {
     /// The file is owned by [`TempFile`] and will be deleted when
     /// the last reference to it is dropped.
@@ -46,8 +46,7 @@ struct TempFileCore {
     path: PathBuf,
 
     /// Pointer to the file to keep it alive.
-    /// The `Option` here is used to sidestep compiler errors when dropping the file.
-    file: Option<File>,
+    file: ManuallyDrop<File>,
 
     /// A hacky approach to allow for "non-owned" files.
     /// If set to `Ownership::Owned`, the file specified in `path` will be deleted
@@ -177,15 +176,12 @@ impl TempFile {
     /// # });
     /// ```
     pub fn ownership(&self) -> Ownership {
-        match self.core.file {
-            Some(_) => Ownership::Owned,
-            _ => Ownership::Borrowed,
-        }
+        self.core.ownership
     }
 
     async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
         let core = TempFileCore {
-            file: Some(
+            file: ManuallyDrop::new(
                 OpenOptions::new()
                     .create(ownership == Ownership::Owned)
                     .read(false)
@@ -227,9 +223,7 @@ impl Drop for TempFileCore {
         // Ensure we don't drop borrowed files.
         if self.ownership == Ownership::Owned {
             // Closing the file handle first, as otherwise the file might not be deleted.
-            if let Some(file) = self.file.take() {
-                drop(file);
-            }
+            drop(unsafe { ManuallyDrop::take(&mut self.file) });
 
             // TODO: Use asynchronous variant if running in an async context.
             // Note that if TempFile is used from the executor's handle,
