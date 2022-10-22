@@ -11,6 +11,8 @@ use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 use uuid::Uuid;
 
+const FILE_PREFIX: &'static str = "atmp_";
+
 /// A named temporary file that will be cleaned automatically
 /// after the last reference to it is dropped.
 pub struct TempFile {
@@ -104,7 +106,7 @@ impl TempFile {
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
         let dir = dir.borrow();
         assert!(dir.is_dir()); // TODO: Return error instead
-        let file_name = format!("img_pp_{}", Uuid::new_v4());
+        let file_name = format!("{}{}", FILE_PREFIX, Uuid::new_v4());
         let mut path = dir.clone();
         path.push(file_name);
         Self::new_internal(path, Ownership::Owned).await
