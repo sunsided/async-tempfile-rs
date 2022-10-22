@@ -1,6 +1,9 @@
+mod errors;
+
+pub use errors::Error;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
-use std::io::{Error, IoSlice, SeekFrom};
+use std::io::{IoSlice, SeekFrom};
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
@@ -33,7 +36,7 @@ pub enum Ownership {
     Owned,
     /// The file is borrowed by [`TempFile`] and will be left untouched
     /// when the last reference to it is dropped.
-    Borrowed
+    Borrowed,
 }
 
 /// The instance that tracks the temporary file.
@@ -105,11 +108,13 @@ impl TempFile {
     /// ```
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
         let dir = dir.borrow();
-        assert!(dir.is_dir()); // TODO: Return error instead
+        if !dir.is_dir() {
+            return Err(Error::InvalidDirectory);
+        }
         let file_name = format!("{}{}", FILE_PREFIX, Uuid::new_v4());
         let mut path = dir.clone();
         path.push(file_name);
-        Self::new_internal(path, Ownership::Owned).await
+        Ok(Self::new_internal(path, Ownership::Owned).await?)
     }
 
     /// Wraps a new instance of this type around an existing file.
@@ -120,7 +125,9 @@ impl TempFile {
     ///
     /// * `path` - The path of the file to wrap.
     pub async fn from_existing(path: PathBuf) -> Result<Self, Error> {
-        debug_assert!(path.is_file()); // TODO: Return error instead
+        if !path.is_file() {
+            return Err(Error::InvalidFile);
+        }
         Self::new_internal(path, Ownership::Borrowed).await
     }
 
@@ -167,7 +174,7 @@ impl TempFile {
     pub fn ownership(&self) -> Ownership {
         match self.core.file {
             Some(_) => Ownership::Owned,
-            _ => Ownership::Borrowed
+            _ => Ownership::Borrowed,
         }
     }
 
@@ -281,15 +288,21 @@ impl AsyncWrite for TempFile {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize, Error>> {
+    ) -> Poll<Result<usize, std::io::Error>> {
         Pin::new(self.file.deref_mut()).poll_write(cx, buf)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         Pin::new(self.file.deref_mut()).poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         Pin::new(self.file.deref_mut()).poll_shutdown(cx)
     }
 
@@ -297,7 +310,7 @@ impl AsyncWrite for TempFile {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
-    ) -> Poll<Result<usize, Error>> {
+    ) -> Poll<Result<usize, std::io::Error>> {
         Pin::new(self.file.deref_mut()).poll_write_vectored(cx, bufs)
     }
 }
