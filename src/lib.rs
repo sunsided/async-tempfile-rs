@@ -23,6 +23,17 @@ pub struct TempFile {
     core: ManuallyDrop<Arc<Box<TempFileCore>>>,
 }
 
+/// Determines the ownership of a temporary file.
+#[derive(Debug, Eq, PartialEq)]
+pub enum Ownership {
+    /// The file is owned by [`TempFile`] and will be deleted when
+    /// the last reference to it is dropped.
+    Owned,
+    /// The file is borrowed by [`TempFile`] and will be left untouched
+    /// when the last reference to it is dropped.
+    Borrowed
+}
+
 /// The instance that tracks the temporary file.
 /// If dropped, the file will be deleted.
 struct TempFileCore {
@@ -43,10 +54,21 @@ impl TempFile {
     ///
     /// ```
     /// # use tempfile::TempFile;
-    /// let file = TempFile::new();
+    /// # use tokio::fs;
+    /// # tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    ///
+    /// // The file exists.
+    /// let file_path = file.file_path().clone();
+    /// assert!(fs::metadata(file_path.clone()).await.is_ok());
     ///
     /// // Deletes the file.
     /// drop(file);
+    ///
+    /// // The file was removed.
+    /// assert!(fs::metadata(file_path).await.is_err());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # });
     /// ```
     pub async fn new() -> Result<Self, Error> {
         Self::new_in(std::env::temp_dir()).await
@@ -63,10 +85,21 @@ impl TempFile {
     ///
     /// ```
     /// # use tempfile::TempFile;
-    /// let file = TempFile::new_in(std::env::temp_dir());
+    /// # use tokio::fs;
+    /// # tokio_test::block_on(async {
+    /// let file = TempFile::new_in(std::env::temp_dir()).await?;
+    ///
+    /// // The file exists.
+    /// let file_path = file.file_path().clone();
+    /// assert!(fs::metadata(file_path.clone()).await.is_ok());
     ///
     /// // Deletes the file.
     /// drop(file);
+    ///
+    /// // The file was removed.
+    /// assert!(fs::metadata(file_path).await.is_err());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # });
     /// ```
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
         let dir = dir.borrow();
@@ -74,7 +107,7 @@ impl TempFile {
         let file_name = format!("img_pp_{}", Uuid::new_v4());
         let mut path = dir.clone();
         path.push(file_name);
-        Self::new_internal(path, true).await
+        Self::new_internal(path, Ownership::Owned).await
     }
 
     /// Wraps a new instance of this type around an existing file.
@@ -86,7 +119,7 @@ impl TempFile {
     /// * `path` - The path of the file to wrap.
     pub async fn from_existing(path: PathBuf) -> Result<Self, Error> {
         debug_assert!(path.is_file()); // TODO: Return error instead
-        Self::new_internal(path, false).await
+        Self::new_internal(path, Ownership::Borrowed).await
     }
 
     /// Returns the path of the underlying temporary file.
@@ -118,9 +151,27 @@ impl TempFile {
         })
     }
 
-    async fn new_internal(path: PathBuf, owned: bool) -> Result<Self, Error> {
+    /// Determines the ownership of the temporary file.
+    /// ### Example
+    /// ```
+    /// # use tempfile::{Ownership, TempFile};
+    /// # tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// assert_eq!(file.ownership(), Ownership::Owned);
+    /// # drop(file);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # });
+    /// ```
+    pub fn ownership(&self) -> Ownership {
+        match self.core.file {
+            Some(_) => Ownership::Owned,
+            _ => Ownership::Borrowed
+        }
+    }
+
+    async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
         let core = TempFileCore {
-            file: if owned {
+            file: if ownership == Ownership::Owned {
                 Some(
                     OpenOptions::new()
                         .create_new(true)

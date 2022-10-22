@@ -13,3 +13,4 @@ uuid = { version = "1.2.1", features = ["v4"] }
 
 [dev-dependencies]
 tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros"] }
+tokio-test = "0.4.2"
