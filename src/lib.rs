@@ -122,31 +122,18 @@ impl TempFile {
     }
 
     /// Wraps a new instance of this type around an existing file.
-    /// This method does not take ownership of the file, i.e. the file will not
-    /// be deleted when the instance is dropped.
+    /// If `ownership` is set to [`Ownership::Borrowed`], this method does not take ownership of
+    /// the file, i.e. the file will not be deleted when the instance is dropped.
     ///
     /// ## Arguments
     ///
     /// * `path` - The path of the file to wrap.
-    pub async fn from_existing(path: PathBuf) -> Result<Self, Error> {
+    /// * `ownership` - The ownership of the file.
+    pub async fn from_existing(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
         if !path.is_file() {
             return Err(Error::InvalidFile);
         }
-        Self::new_internal(path, Ownership::Borrowed).await
-    }
-
-    /// Wraps a new instance of this type around an existing file.
-    /// This method does not take ownership of the file, i.e. the file will not
-    /// be deleted when the instance is dropped.
-    ///
-    /// ## Arguments
-    ///
-    /// * `path` - The path of the file to wrap.
-    pub async fn owned_from_existing(path: PathBuf) -> Result<Self, Error> {
-        if !path.is_file() {
-            return Err(Error::InvalidFile);
-        }
-        Self::new_internal(path, Ownership::Owned).await
+        Self::new_internal(path, ownership).await
     }
 
     /// Returns the path of the underlying temporary file.

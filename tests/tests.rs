@@ -1,4 +1,4 @@
-use async_tempfile::TempFile;
+use async_tempfile::{Ownership, TempFile};
 use tokio::fs::OpenOptions;
 use uuid::Uuid;
 
@@ -40,7 +40,9 @@ async fn borrowed_file_is_not_dropped() {
         .unwrap();
 
     {
-        let temp = TempFile::from_existing(path.clone()).await.unwrap();
+        let temp = TempFile::from_existing(path.clone(), Ownership::Borrowed)
+            .await
+            .unwrap();
         assert!(temp.file_path().is_file());
     }
 
@@ -61,7 +63,9 @@ async fn owned_file_is_dropped() {
         .unwrap();
 
     {
-        let temp = TempFile::owned_from_existing(path.clone()).await.unwrap();
+        let temp = TempFile::from_existing(path.clone(), Ownership::Owned)
+            .await
+            .unwrap();
         assert!(temp.file_path().is_file());
     }
 
