@@ -45,10 +45,13 @@ struct TempFileCore {
     /// The path of the contained file.
     path: PathBuf,
 
-    /// A hacky approach to allow for "non-owned" files.
-    /// If set to `Some(File)`, the file specified in `path` will be deleted
-    /// when this instance is dropped. If set to `None`, the file will be kept.
+    /// Pointer to the file to keep it alive.
     file: Option<File>,
+
+    /// A hacky approach to allow for "non-owned" files.
+    /// If set to `Ownership::Owned`, the file specified in `path` will be deleted
+    /// when this instance is dropped. If set to `Ownership::Borrowed`, the file will be kept.
+    ownership: Ownership,
 }
 
 impl TempFile {
@@ -58,7 +61,7 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// # use async_tempfile::TempFile;
+    /// # use async_tempfile::{TempFile, Error};
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
     /// let file = TempFile::new().await?;
@@ -72,7 +75,7 @@ impl TempFile {
     ///
     /// // The file was removed.
     /// assert!(fs::metadata(file_path).await.is_err());
-    /// # Ok::<(), std::io::Error>(())
+    /// # Ok::<(), Error>(())
     /// # });
     /// ```
     pub async fn new() -> Result<Self, Error> {
@@ -89,7 +92,7 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// # use async_tempfile::TempFile;
+    /// # use async_tempfile::{TempFile, Error};
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
     /// let file = TempFile::new_in(std::env::temp_dir()).await?;
@@ -103,7 +106,7 @@ impl TempFile {
     ///
     /// // The file was removed.
     /// assert!(fs::metadata(file_path).await.is_err());
-    /// # Ok::<(), std::io::Error>(())
+    /// # Ok::<(), Error>(())
     /// # });
     /// ```
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
@@ -179,21 +182,31 @@ impl TempFile {
     }
 
     async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
-        let core = TempFileCore {
-            file: if ownership == Ownership::Owned {
-                Some(
+        let core = if ownership == Ownership::Owned {
+            TempFileCore {
+                file: Some(
                     OpenOptions::new()
                         .create_new(true)
                         .read(false)
                         .write(true)
                         .open(path.clone())
                         .await?,
-                )
-            } else {
-                // Ensure we won't drop non-owned files.
-                None
-            },
-            path: path.clone(),
+                ),
+                ownership: Ownership::Owned,
+                path: path.clone(),
+            }
+        } else {
+            TempFileCore {
+                file: Some(
+                    OpenOptions::new()
+                        .read(false)
+                        .write(true)
+                        .open(path.clone())
+                        .await?,
+                ),
+                ownership: Ownership::Borrowed,
+                path: path.clone(),
+            }
         };
 
         let file = OpenOptions::new()
@@ -223,10 +236,12 @@ impl Drop for TempFile {
 /// If the underlying file is not owned, this operation does nothing.
 impl Drop for TempFileCore {
     fn drop(&mut self) {
-        // Closing the file handle first, as otherwise the file might not be deleted.
         // Ensure we don't drop borrowed files.
-        if let Some(file) = self.file.take() {
-            drop(file);
+        if self.ownership == Ownership::Owned {
+            // Closing the file handle first, as otherwise the file might not be deleted.
+            if let Some(file) = self.file.take() {
+                drop(file);
+            }
 
             // TODO: Use asynchronous variant if running in an async context.
             // Note that if TempFile is used from the executor's handle,
