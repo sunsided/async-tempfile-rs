@@ -53,9 +53,9 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// # use tempfile::TempFile;
+    /// # use async_tempfile::TempFile;
     /// # use tokio::fs;
-    /// # tokio_test::block_on(async {
+    /// # let _ = tokio_test::block_on(async {
     /// let file = TempFile::new().await?;
     ///
     /// // The file exists.
@@ -67,7 +67,7 @@ impl TempFile {
     ///
     /// // The file was removed.
     /// assert!(fs::metadata(file_path).await.is_err());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # Ok::<(), std::io::Error>(())
     /// # });
     /// ```
     pub async fn new() -> Result<Self, Error> {
@@ -84,9 +84,9 @@ impl TempFile {
     /// ## Example
     ///
     /// ```
-    /// # use tempfile::TempFile;
+    /// # use async_tempfile::TempFile;
     /// # use tokio::fs;
-    /// # tokio_test::block_on(async {
+    /// # let _ = tokio_test::block_on(async {
     /// let file = TempFile::new_in(std::env::temp_dir()).await?;
     ///
     /// // The file exists.
@@ -98,7 +98,7 @@ impl TempFile {
     ///
     /// // The file was removed.
     /// assert!(fs::metadata(file_path).await.is_err());
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # Ok::<(), std::io::Error>(())
     /// # });
     /// ```
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
@@ -154,8 +154,8 @@ impl TempFile {
     /// Determines the ownership of the temporary file.
     /// ### Example
     /// ```
-    /// # use tempfile::{Ownership, TempFile};
-    /// # tokio_test::block_on(async {
+    /// # use async_tempfile::{Ownership, TempFile};
+    /// # let _ = tokio_test::block_on(async {
     /// let file = TempFile::new().await?;
     /// assert_eq!(file.ownership(), Ownership::Owned);
     /// # drop(file);

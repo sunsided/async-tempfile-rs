@@ -1,4 +1,4 @@
-use tempfile::TempFile;
+use async_tempfile::TempFile;
 
 #[tokio::test]
 async fn file_is_deleted_when_dropping() {
