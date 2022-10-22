@@ -46,6 +46,7 @@ struct TempFileCore {
     path: PathBuf,
 
     /// Pointer to the file to keep it alive.
+    /// The `Option` here is used to sidestep compiler errors when dropping the file.
     file: Option<File>,
 
     /// A hacky approach to allow for "non-owned" files.
@@ -134,6 +135,20 @@ impl TempFile {
         Self::new_internal(path, Ownership::Borrowed).await
     }
 
+    /// Wraps a new instance of this type around an existing file.
+    /// This method does not take ownership of the file, i.e. the file will not
+    /// be deleted when the instance is dropped.
+    ///
+    /// ## Arguments
+    ///
+    /// * `path` - The path of the file to wrap.
+    pub async fn owned_from_existing(path: PathBuf) -> Result<Self, Error> {
+        if !path.is_file() {
+            return Err(Error::InvalidFile);
+        }
+        Self::new_internal(path, Ownership::Owned).await
+    }
+
     /// Returns the path of the underlying temporary file.
     pub fn file_path(&self) -> &PathBuf {
         &self.core.path
@@ -182,31 +197,17 @@ impl TempFile {
     }
 
     async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
-        let core = if ownership == Ownership::Owned {
-            TempFileCore {
-                file: Some(
-                    OpenOptions::new()
-                        .create_new(true)
-                        .read(false)
-                        .write(true)
-                        .open(path.clone())
-                        .await?,
-                ),
-                ownership: Ownership::Owned,
-                path: path.clone(),
-            }
-        } else {
-            TempFileCore {
-                file: Some(
-                    OpenOptions::new()
-                        .read(false)
-                        .write(true)
-                        .open(path.clone())
-                        .await?,
-                ),
-                ownership: Ownership::Borrowed,
-                path: path.clone(),
-            }
+        let core = TempFileCore {
+            file: Some(
+                OpenOptions::new()
+                    .create(ownership == Ownership::Owned)
+                    .read(false)
+                    .write(true)
+                    .open(path.clone())
+                    .await?,
+            ),
+            ownership,
+            path: path.clone(),
         };
 
         let file = OpenOptions::new()
