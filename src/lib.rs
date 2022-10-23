@@ -221,15 +221,17 @@ impl Drop for TempFile {
 impl Drop for TempFileCore {
     fn drop(&mut self) {
         // Ensure we don't drop borrowed files.
-        if self.ownership == Ownership::Owned {
-            // Closing the file handle first, as otherwise the file might not be deleted.
-            drop(unsafe { ManuallyDrop::take(&mut self.file) });
-
-            // TODO: Use asynchronous variant if running in an async context.
-            // Note that if TempFile is used from the executor's handle,
-            //      this may block the executor itself.
-            let _ = std::fs::remove_file(&self.path);
+        if self.ownership != Ownership::Owned {
+            return;
         }
+
+        // Closing the file handle first, as otherwise the file might not be deleted.
+        drop(unsafe { ManuallyDrop::take(&mut self.file) });
+
+        // TODO: Use asynchronous variant if running in an async context.
+        // Note that if TempFile is used from the executor's handle,
+        //      this may block the executor itself.
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
