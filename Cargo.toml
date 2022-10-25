@@ -2,11 +2,13 @@
 name = "async-tempfile"
 version = "0.2.0"
 description = "Automatically deleted async I/O temporary files."
+documentation = "https://docs.rs/async-tempfile/latest/async_tempfile/"
 license = "MIT"
 authors = ["Markus Mayer"]
 repository = "https://github.com/sunsided/async-tempfile-rs"
 keywords = ["tokio", "temporary-files", "temp"]
 categories = ["asynchronous", "filesystem"]
+readme = "README.md"
 edition = "2021"
 
 [dependencies]
