@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Added the `open_ro` method to create a new clone in read-only mode.
 
 ## 0.2.0 - 2022-10-22
 

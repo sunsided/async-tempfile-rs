@@ -15,11 +15,24 @@ async fn file_is_deleted_when_dropping() {
 }
 
 #[tokio::test]
-async fn file_is_not_dropped_while_still_referenced() {
+async fn rw_file_is_not_dropped_while_still_referenced() {
     let parent = TempFile::new().await.unwrap();
 
     {
         let nested = parent.open_rw().await.unwrap();
+        assert_eq!(nested.file_path(), parent.file_path());
+        assert!(nested.file_path().is_file());
+    }
+
+    assert!(parent.file_path().is_file());
+}
+
+#[tokio::test]
+async fn ro_file_is_not_dropped_while_still_referenced() {
+    let parent = TempFile::new().await.unwrap();
+
+    {
+        let nested = parent.open_ro().await.unwrap();
         assert_eq!(nested.file_path(), parent.file_path());
         assert!(nested.file_path().is_file());
     }

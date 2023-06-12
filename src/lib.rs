@@ -177,6 +177,19 @@ impl TempFile {
         })
     }
 
+    /// Opens a new TempFile instance in read-only mode.
+    pub async fn open_ro(&self) -> Result<TempFile, Error> {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(false)
+            .open(&self.core.path)
+            .await?;
+        Ok(TempFile {
+            core: self.core.clone(),
+            file: ManuallyDrop::new(file),
+        })
+    }
+
     /// Creates a new TempFile instance that shares the same underlying
     /// file handle as the existing TempFile instance.
     /// Reads, writes, and seeks will affect both TempFile instances simultaneously.
