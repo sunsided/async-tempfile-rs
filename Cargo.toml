@@ -1,6 +1,6 @@
 [package]
 name = "async-tempfile"
-version = "0.2.0"
+version = "0.3.0"
 description = "Automatically deleted async I/O temporary files."
 documentation = "https://docs.rs/async-tempfile/latest/async_tempfile/"
 license = "MIT"
