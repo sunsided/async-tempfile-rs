@@ -1,6 +1,6 @@
 //! # async-tempfile
 //!
-//! Provides the TempFile struct, an asynchronous wrapper based on `tokio::fs` for temporary
+//! Provides the [`TempFile`] struct, an asynchronous wrapper based on `tokio::fs` for temporary
 //! files that will be automatically deleted when the last reference to the struct is dropped.
 //!
 //! ```
@@ -21,7 +21,14 @@
 //!     assert!(parent.file_path().is_file());
 //! }
 //! ```
+//!
+//! ## Features
+//!
+//! * `uuid` - (Default) Enables random file name generation based on the [`uuid`](https://crates.io/crates/uuid) crate.
+//!            Provides the `new` and `new_in`, as well as the `new_with_uuid*` group of methods.
 
+// Document crate features on docs.rs.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Required for dropping the file.
 #![allow(unsafe_code)]
 
@@ -107,6 +114,8 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
+    #[cfg(feature = "uuid")]
     pub async fn new() -> Result<Self, Error> {
         Self::new_in(Self::default_dir()).await
     }
@@ -170,6 +179,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
     pub async fn new_with_uuid(uuid: Uuid) -> Result<Self, Error> {
         Self::new_with_uuid_in(uuid, Self::default_dir()).await
@@ -203,6 +213,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
         let id = Uuid::new_v4();
@@ -282,6 +293,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
     pub async fn new_with_uuid_in<P: Borrow<PathBuf>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
         let file_name = format!("{}{}", FILE_PREFIX, uuid);
