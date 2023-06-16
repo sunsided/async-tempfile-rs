@@ -22,6 +22,9 @@
 //! }
 //! ```
 
+// Required for dropping the file.
+#![allow(unsafe_code)]
+
 mod errors;
 
 pub use errors::Error;
