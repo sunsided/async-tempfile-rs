@@ -7,6 +7,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Added `uuid` as a default crate feature and feature gated all `uuid` crate related functionality.
 - Added the `new_with_name` and `new_with_name_in` methods to use a provided file name.
 - Added the `new_with_uuid` and `new_with_uuid_in` methods to use a provided UUID
   as the file suffix.

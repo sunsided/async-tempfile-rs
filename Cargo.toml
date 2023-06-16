@@ -11,9 +11,18 @@ categories = ["asynchronous", "filesystem"]
 readme = "README.md"
 edition = "2021"
 
+[features]
+default = ["uuid"]
+uuid = ["dep:uuid"]
+
+[[test]]
+name = "tests"
+path = "tests/tests.rs"
+required-features = ["uuid"]
+
 [dependencies]
 tokio = { version = "1.21.2", features = ["fs"] }
-uuid = { version = "1.2.1", features = ["v4"] }
+uuid = { version = "1.2.1", features = ["v4"], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros"] }

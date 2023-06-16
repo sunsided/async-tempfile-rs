@@ -36,6 +36,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
+
+#[cfg(feature = "uuid")]
 use uuid::Uuid;
 
 const FILE_PREFIX: &'static str = "atmp_";
@@ -165,6 +167,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg(feature = "uuid")]
     pub async fn new_with_uuid(uuid: Uuid) -> Result<Self, Error> {
         Self::new_with_uuid_in(uuid, Self::default_dir()).await
     }
@@ -197,9 +200,10 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg(feature = "uuid")]
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
         let id = Uuid::new_v4();
-        Self::new_with_uuid_in(id, dir).await
+        return Self::new_with_uuid_in(id, dir).await;
     }
 
     /// Creates a new temporary file in the specified location.
@@ -275,6 +279,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
+    #[cfg(feature = "uuid")]
     pub async fn new_with_uuid_in<P: Borrow<PathBuf>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
         let file_name = format!("{}{}", FILE_PREFIX, uuid);
         Self::new_with_name_in(file_name, dir).await
