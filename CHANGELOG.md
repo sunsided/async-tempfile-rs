@@ -7,8 +7,9 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Added the `new_with_uuid` and `new_with_uuid_in` method to use a provided UUID
-  for as the file suffix.
+- Added the `new_with_name` and `new_with_name_in` methods to use a provided file name.
+- Added the `new_with_uuid` and `new_with_uuid_in` methods to use a provided UUID
+  as the file suffix.
 
 ## 0.3.0 - 2023-06-12
 
