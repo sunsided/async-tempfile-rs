@@ -1,6 +1,6 @@
 [package]
 name = "async-tempfile"
-version = "0.3.0"
+version = "0.4.0"
 description = "Automatically deleted async I/O temporary files."
 documentation = "https://docs.rs/async-tempfile/latest/async_tempfile/"
 license = "MIT"
@@ -21,11 +21,11 @@ path = "tests/tests.rs"
 required-features = ["uuid"]
 
 [dependencies]
-tokio = { version = "1.21.2", features = ["fs"] }
-uuid = { version = "1.2.1", features = ["v4"], optional = true }
+tokio = { version = "1.28.2", features = ["fs"] }
+uuid = { version = "1.3.4", features = ["v4"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.28.2", features = ["rt-multi-thread", "macros"] }
 tokio-test = "0.4.2"
 
 [package.metadata.docs.rs]
