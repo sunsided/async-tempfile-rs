@@ -103,7 +103,35 @@ impl TempFile {
     /// # });
     /// ```
     pub async fn new() -> Result<Self, Error> {
-        Self::new_in(std::env::temp_dir()).await
+        Self::new_in(Self::default_dir()).await
+    }
+
+    /// Creates a new temporary file in the default location.
+    /// When the instance goes out of scope, the file will be deleted.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempFile, Error};
+    /// # use tokio::fs;
+    /// # let _ = tokio_test::block_on(async {
+    /// let id = uuid::Uuid::new_v4();
+    /// let file = TempFile::new_with_uuid(id).await?;
+    ///
+    /// // The file exists.
+    /// let file_path = file.file_path().clone();
+    /// assert!(fs::metadata(file_path.clone()).await.is_ok());
+    ///
+    /// // Deletes the file.
+    /// drop(file);
+    ///
+    /// // The file was removed.
+    /// assert!(fs::metadata(file_path).await.is_err());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub async fn new_with_uuid(uuid: Uuid) -> Result<Self, Error> {
+        Self::new_with_uuid_in(uuid, Self::default_dir()).await
     }
 
     /// Creates a new temporary file in the specified location.
@@ -119,7 +147,8 @@ impl TempFile {
     /// # use async_tempfile::{TempFile, Error};
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
-    /// let file = TempFile::new_in(std::env::temp_dir()).await?;
+    /// let path = std::env::temp_dir();
+    /// let file = TempFile::new_in(path).await?;
     ///
     /// // The file exists.
     /// let file_path = file.file_path().clone();
@@ -134,11 +163,47 @@ impl TempFile {
     /// # });
     /// ```
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
+        let id = Uuid::new_v4();
+        Self::new_with_uuid_in(id, dir).await
+    }
+
+    /// Creates a new temporary file in the specified location.
+    /// When the instance goes out of scope, the file will be deleted.
+    ///
+    /// ## Arguments
+    ///
+    /// * `dir` - The directory to create the file in.
+    /// * `uuid` - A UUID used as a suffix to the file name.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempFile, Error};
+    /// # use tokio::fs;
+    /// # let _ = tokio_test::block_on(async {
+    ///
+    /// let path = std::env::temp_dir();
+    /// let id = uuid::Uuid::new_v4();
+    /// let file = TempFile::new_with_uuid_in(id, path).await?;
+    ///
+    /// // The file exists.
+    /// let file_path = file.file_path().clone();
+    /// assert!(fs::metadata(file_path.clone()).await.is_ok());
+    ///
+    /// // Deletes the file.
+    /// drop(file);
+    ///
+    /// // The file was removed.
+    /// assert!(fs::metadata(file_path).await.is_err());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub async fn new_with_uuid_in<P: Borrow<PathBuf>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
         let dir = dir.borrow();
         if !dir.is_dir() {
             return Err(Error::InvalidDirectory);
         }
-        let file_name = format!("{}{}", FILE_PREFIX, Uuid::new_v4());
+        let file_name = format!("{}{}", FILE_PREFIX, uuid);
         let mut path = dir.clone();
         path.push(file_name);
         Ok(Self::new_internal(path, Ownership::Owned).await?)
@@ -239,6 +304,12 @@ impl TempFile {
             file: ManuallyDrop::new(file),
             core: ManuallyDrop::new(Arc::new(Box::new(core))),
         })
+    }
+
+    /// Gets the default temporary file directory.
+    #[inline(always)]
+    fn default_dir() -> PathBuf {
+        std::env::temp_dir()
     }
 }
 

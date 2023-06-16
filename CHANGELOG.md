@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Added the `new_with_uuid` and `new_with_uuid_in` method to use a provided UUID
+  for as the file suffix.
+
 ## 0.3.0 - 2023-06-12
 
 ### Added
