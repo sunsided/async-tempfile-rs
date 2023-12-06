@@ -9,7 +9,6 @@ use async_tempfile::TempFile;
 
 #[tokio::main]
 async fn main() {
-    // NOTE: The new() function is available with the `uuid` crate feature.
     let parent = TempFile::new().await.unwrap();
 
     // The cloned reference will not delete the file when dropped.
