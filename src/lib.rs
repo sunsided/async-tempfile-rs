@@ -187,6 +187,11 @@ impl TempFile {
     /// Creates a new temporary file in the specified location.
     /// When the instance goes out of scope, the file will be deleted.
     ///
+    /// ## Crate Features
+    ///
+    /// * `uuid` - When the `uuid` crate feature is enabled, a random UUIDv4 is used to
+    ///   generate the temporary file name.
+    ///
     /// ## Arguments
     ///
     /// * `dir` - The directory to create the file in.
