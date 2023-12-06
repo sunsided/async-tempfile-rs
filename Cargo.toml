@@ -18,7 +18,6 @@ uuid = ["dep:uuid"]
 [[test]]
 name = "tests"
 path = "tests/tests.rs"
-required-features = ["uuid"]
 
 [dependencies]
 tokio = { version = "1.34.0", features = ["fs"] }
