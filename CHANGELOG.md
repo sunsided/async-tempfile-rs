@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- The `uuid` feature is now not enabled by default anymore.
+
+### Internal
+
+- Some unnecessary heap allocations were removed.
+
 ## 0.4.0 - 2023-06-16
 
 ### Added
