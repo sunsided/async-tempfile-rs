@@ -50,6 +50,7 @@ use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
+#[cfg(feature = "uuid")]
 const FILE_PREFIX: &'static str = "atmp_";
 
 /// A named temporary file that will be cleaned automatically
@@ -61,7 +62,7 @@ pub struct TempFile {
     /// A shared pointer to the owned (or non-owned) file.
     /// The `Arc` ensures that the enclosed file is kept alive
     /// until all references to it are dropped.
-    core: ManuallyDrop<Arc<Box<TempFileCore>>>,
+    core: ManuallyDrop<Arc<TempFileCore>>,
 }
 
 /// Determines the ownership of a temporary file.
@@ -260,7 +261,7 @@ impl TempFile {
         let file_name = name.as_ref();
         let mut path = dir.clone();
         path.push(file_name);
-        Ok(Self::new_internal(path, Ownership::Owned).await?)
+        Self::new_internal(path, Ownership::Owned).await
     }
 
     /// Creates a new temporary file in the specified location.
@@ -393,7 +394,7 @@ impl TempFile {
             .await?;
         Ok(Self {
             file: ManuallyDrop::new(file),
-            core: ManuallyDrop::new(Arc::new(Box::new(core))),
+            core: ManuallyDrop::new(Arc::new(core)),
         })
     }
 
