@@ -36,7 +36,7 @@ mod errors;
 
 pub use errors::Error;
 use std::borrow::{Borrow, BorrowMut};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Debug, Formatter};
 use std::io::{IoSlice, SeekFrom};
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
@@ -51,7 +51,7 @@ use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-const FILE_PREFIX: &'static str = "atmp_";
+const FILE_PREFIX: &str = "atmp_";
 
 /// A named temporary file that will be cleaned automatically
 /// after the last reference to it is dropped.
@@ -215,13 +215,13 @@ impl TempFile {
         #[cfg(feature = "uuid")]
         {
             let id = Uuid::new_v4();
-            return Self::new_with_uuid_in(id, dir).await;
+            Self::new_with_uuid_in(id, dir).await
         }
 
         #[cfg(not(feature = "uuid"))]
         {
-            let name = RandomName::default();
-            return Self::new_with_name_in(name.to_string(), dir).await;
+            let name = RandomName::new();
+            Self::new_with_name_in(name, dir).await
         }
     }
 
@@ -410,17 +410,12 @@ impl TempFile {
 }
 
 /// Represents a randomly generated file name.
-#[derive(Default)]
-struct RandomName;
-
-impl RandomName {
-    fn to_string(self) -> String {
-        format!("{}", self)
-    }
+struct RandomName {
+    name: String,
 }
 
-impl Display for RandomName {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl RandomName {
+    fn new() -> Self {
         let pid = std::process::id();
 
         // Using the address of a local variable for extra variation.
@@ -432,11 +427,18 @@ impl Display for RandomName {
             .unwrap_or(std::time::Duration::from_secs(0));
         let (secs, subsec_nanos) = (now.as_secs(), now.subsec_nanos());
 
-        write!(
-            f,
-            "{}{}{:x}{:x}{:x}",
-            FILE_PREFIX, pid, marker, secs, subsec_nanos
-        )
+        Self {
+            name: format!(
+                "{}{}{:x}{:x}{:x}",
+                FILE_PREFIX, pid, marker, secs, subsec_nanos
+            ),
+        }
+    }
+}
+
+impl AsRef<str> for RandomName {
+    fn as_ref(&self) -> &str {
+        &self.name
     }
 }
 
@@ -577,7 +579,7 @@ mod tests {
 
     #[test]
     fn test_random_name() {
-        let name = RandomName::default();
-        assert!(name.to_string().starts_with(FILE_PREFIX))
+        let name = RandomName::new();
+        assert!(name.as_ref().starts_with(FILE_PREFIX))
     }
 }
