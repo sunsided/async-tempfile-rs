@@ -36,7 +36,7 @@ mod errors;
 
 pub use errors::Error;
 use std::borrow::{Borrow, BorrowMut};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io::{IoSlice, SeekFrom};
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
@@ -44,13 +44,13 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::SystemTime;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-#[cfg(feature = "uuid")]
 const FILE_PREFIX: &'static str = "atmp_";
 
 /// A named temporary file that will be cleaned automatically
@@ -115,8 +115,6 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
-    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
-    #[cfg(feature = "uuid")]
     pub async fn new() -> Result<Self, Error> {
         Self::new_in(Self::default_dir()).await
     }
@@ -213,12 +211,18 @@ impl TempFile {
     /// assert!(fs::metadata(file_path).await.is_err());
     /// # Ok::<(), Error>(())
     /// # });
-    /// ```
-    #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
-    #[cfg(feature = "uuid")]
     pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
-        let id = Uuid::new_v4();
-        return Self::new_with_uuid_in(id, dir).await;
+        #[cfg(feature = "uuid")]
+        {
+            let id = Uuid::new_v4();
+            return Self::new_with_uuid_in(id, dir).await;
+        }
+
+        #[cfg(not(feature = "uuid"))]
+        {
+            let name = RandomName::default();
+            return Self::new_with_name_in(name.to_string(), dir).await;
+        }
     }
 
     /// Creates a new temporary file in the specified location.
@@ -405,6 +409,37 @@ impl TempFile {
     }
 }
 
+/// Represents a randomly generated file name.
+#[derive(Default)]
+struct RandomName;
+
+impl RandomName {
+    fn to_string(self) -> String {
+        format!("{}", self)
+    }
+}
+
+impl Display for RandomName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let pid = std::process::id();
+
+        // Using the address of a local variable for extra variation.
+        let marker = &pid as *const _ as usize;
+
+        // Current timestamp for added variation.
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or(std::time::Duration::from_secs(0));
+        let (secs, subsec_nanos) = (now.as_secs(), now.subsec_nanos());
+
+        write!(
+            f,
+            "{}{}{:x}{:x}{:x}",
+            FILE_PREFIX, pid, marker, secs, subsec_nanos
+        )
+    }
+}
+
 /// Ensures the file handles are closed before the core reference is freed.
 /// If the core reference would be freed while handles are still open, it is
 /// possible that the underlying file cannot be deleted.
@@ -533,5 +568,16 @@ impl AsyncSeek for TempFile {
 
     fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
         Pin::new(self.file.deref_mut()).poll_complete(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_random_name() {
+        let name = RandomName::default();
+        assert!(name.to_string().starts_with(FILE_PREFIX))
     }
 }

@@ -7,6 +7,8 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The `new` and `new_in` functions now do not rely on the `uuid` feature anymore
+  to generate temporary file names.
 - The `uuid` feature is now not enabled by default anymore.
 
 ### Internal
