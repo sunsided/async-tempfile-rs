@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.5.0] - 2023-12-06
 
 ### Changed
 
@@ -15,7 +15,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Some unnecessary heap allocations were removed.
 
-## 0.4.0 - 2023-06-16
+## [0.4.0] - 2023-06-16
 
 ### Added
 
@@ -44,3 +44,6 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Internal
 
 - 🎉 Initial release.
+
+[0.5.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/0.5.0
+[0.4.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/0.4.0
