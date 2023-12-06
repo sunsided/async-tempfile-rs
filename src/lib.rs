@@ -420,6 +420,7 @@ struct RandomName {
 }
 
 impl RandomName {
+    #[allow(dead_code)]
     fn new() -> Self {
         let pid = std::process::id();
 
