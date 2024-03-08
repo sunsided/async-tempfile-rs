@@ -396,6 +396,12 @@ impl Borrow<Path> for TempDir {
     }
 }
 
+impl Borrow<Path> for &TempDir {
+    fn borrow(&self) -> &Path {
+        &self.dir
+    }
+}
+
 impl AsRef<Path> for TempDir {
     fn as_ref(&self) -> &Path {
         &self.dir
@@ -405,18 +411,45 @@ impl AsRef<Path> for TempDir {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TempFile;
 
     #[tokio::test]
     async fn test_new() -> Result<(), Error> {
         let dir = TempDir::new().await?;
 
-        // The file exists.
+        // The directory exists.
         let dir_path = dir.dir_path().clone();
         assert!(tokio::fs::metadata(dir_path.clone()).await.is_ok());
 
         // Deletes the directory.
         drop(dir);
 
+        assert!(tokio::fs::metadata(dir_path).await.is_err());
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
+    async fn test_files_in_dir() -> Result<(), Error> {
+        let dir = TempDir::new().await?;
+        let file = TempFile::new_in(&dir).await?;
+
+        // The directory exists.
+        let dir_path = dir.dir_path().clone();
+        assert!(tokio::fs::metadata(dir_path.clone()).await.is_ok());
+
+        // The file exists.
+        let file_path = file.file_path().clone();
+        assert!(tokio::fs::metadata(file_path.clone()).await.is_ok());
+
+        // Deletes the directory.
+        drop(dir);
+
+        // The file is gone (even though it is still open).
+        // TODO: This may cause trouble on Windows as Windows locks files when open.
+        assert!(tokio::fs::metadata(file_path).await.is_err());
+
+        // The directory is gone.
         assert!(tokio::fs::metadata(dir_path).await.is_err());
         Ok(())
     }

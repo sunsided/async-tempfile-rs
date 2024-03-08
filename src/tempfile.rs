@@ -35,7 +35,7 @@ use std::fmt::{Debug, Formatter};
 use std::io::{IoSlice, SeekFrom};
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -203,7 +203,7 @@ impl TempFile {
     /// assert!(fs::metadata(file_path).await.is_err());
     /// # Ok::<(), Error>(())
     /// # });
-    pub async fn new_in<P: Borrow<PathBuf>>(dir: P) -> Result<Self, Error> {
+    pub async fn new_in<P: Borrow<Path>>(dir: P) -> Result<Self, Error> {
         #[cfg(feature = "uuid")]
         {
             let id = Uuid::new_v4();
@@ -246,7 +246,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
-    pub async fn new_with_name_in<N: AsRef<str>, P: Borrow<PathBuf>>(
+    pub async fn new_with_name_in<N: AsRef<str>, P: Borrow<Path>>(
         name: N,
         dir: P,
     ) -> Result<Self, Error> {
@@ -255,7 +255,7 @@ impl TempFile {
             return Err(Error::InvalidDirectory);
         }
         let file_name = name.as_ref();
-        let mut path = dir.clone();
+        let mut path = PathBuf::from(dir);
         path.push(file_name);
         Self::new_internal(path, Ownership::Owned).await
     }
