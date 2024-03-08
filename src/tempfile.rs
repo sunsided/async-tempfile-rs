@@ -292,7 +292,7 @@ impl TempFile {
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
-    pub async fn new_with_uuid_in<P: Borrow<PathBuf>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
+    pub async fn new_with_uuid_in<P: Borrow<Path>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
         let file_name = format!("{}{}", FILE_PREFIX, uuid);
         Self::new_with_name_in(file_name, dir).await
     }
@@ -305,8 +305,11 @@ impl TempFile {
     ///
     /// * `path` - The path of the file to wrap.
     /// * `ownership` - The ownership of the file.
-    pub async fn from_existing(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
-        if !path.is_file() {
+    pub async fn from_existing<P: Borrow<Path>>(
+        path: P,
+        ownership: Ownership,
+    ) -> Result<Self, Error> {
+        if !path.borrow().is_file() {
             return Err(Error::InvalidFile);
         }
         Self::new_internal(path, ownership).await
@@ -369,25 +372,23 @@ impl TempFile {
         self.core.ownership
     }
 
-    async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
+    async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
+        let path = path.borrow();
+
         let core = TempFileCore {
             file: ManuallyDrop::new(
                 OpenOptions::new()
                     .create(ownership == Ownership::Owned)
                     .read(false)
                     .write(true)
-                    .open(path.clone())
+                    .open(path)
                     .await?,
             ),
             ownership,
-            path: path.clone(),
+            path: PathBuf::from(path),
         };
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path.clone())
-            .await?;
+        let file = OpenOptions::new().read(true).write(true).open(path).await?;
         Ok(Self {
             file: ManuallyDrop::new(file),
             core: ManuallyDrop::new(Arc::new(core)),

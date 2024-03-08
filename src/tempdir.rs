@@ -161,7 +161,7 @@ impl TempDir {
     /// assert!(fs::metadata(dir_path).await.is_err());
     /// # Ok::<(), Error>(())
     /// # });
-    pub async fn new_in<P: Borrow<PathBuf>>(root_dir: P) -> Result<Self, Error> {
+    pub async fn new_in<P: Borrow<Path>>(root_dir: P) -> Result<Self, Error> {
         #[cfg(feature = "uuid")]
         {
             let id = Uuid::new_v4();
@@ -204,7 +204,7 @@ impl TempDir {
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
-    pub async fn new_with_name_in<N: AsRef<str>, P: Borrow<PathBuf>>(
+    pub async fn new_with_name_in<N: AsRef<str>, P: Borrow<Path>>(
         name: N,
         root_dir: P,
     ) -> Result<Self, Error> {
@@ -213,7 +213,7 @@ impl TempDir {
             return Err(Error::InvalidDirectory);
         }
         let file_name = name.as_ref();
-        let mut path = dir.clone();
+        let mut path = PathBuf::from(dir);
         path.push(file_name);
         Self::new_internal(path, Ownership::Owned).await
     }
@@ -250,10 +250,7 @@ impl TempDir {
     /// ```
     #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
-    pub async fn new_with_uuid_in<P: Borrow<PathBuf>>(
-        uuid: Uuid,
-        root_dir: P,
-    ) -> Result<Self, Error> {
+    pub async fn new_with_uuid_in<P: Borrow<Path>>(uuid: Uuid, root_dir: P) -> Result<Self, Error> {
         let file_name = format!("{}{}", DIR_PREFIX, uuid);
         Self::new_with_name_in(file_name, root_dir).await
     }
@@ -304,17 +301,17 @@ impl TempDir {
         self.core.ownership
     }
 
-    async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
+    async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
         // Create the directory and all its parents.
-        tokio::fs::create_dir_all(path.clone()).await?;
+        tokio::fs::create_dir_all(path.borrow()).await?;
 
         let core = TempDirCore {
             ownership,
-            path: path.clone(),
+            path: PathBuf::from(path.borrow()),
         };
 
         Ok(Self {
-            dir: ManuallyDrop::new(path),
+            dir: ManuallyDrop::new(PathBuf::from(path.borrow())),
             core: ManuallyDrop::new(Arc::new(core)),
         })
     }

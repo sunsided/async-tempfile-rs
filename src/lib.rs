@@ -38,6 +38,7 @@ mod tempdir;
 mod tempfile;
 
 pub use errors::Error;
+#[cfg(not(feature = "uuid"))]
 pub(crate) use random_name::RandomName;
 use std::fmt::Debug;
 pub use tempdir::TempDir;
