@@ -452,4 +452,19 @@ mod tests {
         assert!(tokio::fs::metadata(dir_path).await.is_err());
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_manual_close() -> Result<(), Error> {
+        let dir = TempDir::new().await?;
+
+        // The dir exists.
+        let dir_path = dir.dir_path().clone();
+        assert!(tokio::fs::metadata(dir_path.clone()).await.is_ok());
+
+        // Deletes the directory.
+        dir.close().await?;
+
+        assert!(tokio::fs::metadata(dir_path).await.is_err());
+        Ok(())
+    }
 }

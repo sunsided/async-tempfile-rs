@@ -40,6 +40,7 @@ use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::fs::{File, OpenOptions};
@@ -79,6 +80,10 @@ struct TempFileCore {
     /// If set to `Ownership::Owned`, the file specified in `path` will be deleted
     /// when this instance is dropped. If set to `Ownership::Borrowed`, the file will be kept.
     ownership: Ownership,
+
+    /// Indicates whether the file is opened by this handle.
+    /// This is used to skip closing operations in drop when the file was manually closed.
+    open: AtomicBool,
 }
 
 impl TempFile {
@@ -322,13 +327,10 @@ impl TempFile {
     /// * `Ok(false)` if the file was not deleted because it is still used
     /// * `Err(_)` if deletion of the file failed (e.g. due to file locks on Windows)
     pub async fn close(mut self) -> Result<bool, Error> {
-        // Ensure all file handles are closed before we attempt to delete the file itself via core.
         drop(unsafe { ManuallyDrop::take(&mut self.file) });
-
-        // Take core out of self and attempt to unwrap the Arc. This only succeeds if we
-        // are the last instance pointing at it.
         let core = unsafe { ManuallyDrop::take(&mut self.core) };
-        if let Ok(core) = Arc::try_unwrap(core) {
+
+        if let Ok(core) = Arc::into_inner(core) {
             core.close().await?;
             Ok(true)
         } else {
@@ -395,6 +397,7 @@ impl TempFile {
 
     async fn new_internal(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
         let core = TempFileCore {
+            open: AtomicBool::new(true),
             file: ManuallyDrop::new(
                 OpenOptions::new()
                     .create(ownership == Ownership::Owned)
@@ -436,15 +439,24 @@ impl crate::AsyncClose for TempFile {
 
 impl TempFileCore {
     /// Attempt to close and remove this file.
-    pub async fn close(mut self) -> Result<(), Error> {
+    async fn close(&mut self) -> Result<bool, Error> {
         // Ensure we don't drop borrowed directories.
         if self.ownership != Ownership::Owned {
-            return Ok(());
+            return Ok(false);
         }
 
-        // Closing the file handle first, as otherwise the file might not be deleted.
-        let _file = unsafe { ManuallyDrop::take(&mut self.file) };
-        Ok(tokio::fs::remove_file(&self.path).await?)
+        // Leave if the file was already closed (somehow).
+        if !self.open.swap(false, Ordering::SeqCst).is_err() {
+            return Ok(false);
+        }
+
+        // Attempt to delete the file. If it fails, reset the marker to "open" in order to
+        // give the drop another chance.
+        if let Err(e) = tokio::fs::remove_file(&self.path).await {
+            self.open.store(true, Ordering::SeqCst).ok();
+            return Err(e.into());
+        }
+        Ok(true)
     }
 }
 
@@ -456,7 +468,12 @@ impl Drop for TempFile {
     fn drop(&mut self) {
         // Ensure all file handles are closed before we attempt to delete the file itself via core.
         drop(unsafe { ManuallyDrop::take(&mut self.file) });
-        drop(unsafe { ManuallyDrop::take(&mut self.core) });
+        let core = unsafe { ManuallyDrop::take(&mut self.core) };
+
+        // Don't drop core manually if it was already handled by the manual drops.
+        if core.swap(false, Ordering::SeqCst).is_err() {
+            drop(core)
+        }
     }
 }
 
@@ -472,6 +489,11 @@ impl Drop for TempFileCore {
 
         // Closing the file handle first, as otherwise the file might not be deleted.
         drop(unsafe { ManuallyDrop::take(&mut self.file) });
+
+        // Skip the deletion if the file was already closed manually.
+        if !self.open.swap(false, Ordering::SeqCst) {
+            return;
+        }
 
         // TODO: Use asynchronous variant if running in an async context.
         // Note that if TempFile is used from the executor's handle,
@@ -590,5 +612,20 @@ mod tests {
     fn test_random_name() {
         let name = RandomName::new(FILE_PREFIX);
         assert!(name.as_ref().starts_with(FILE_PREFIX))
+    }
+
+    #[tokio::test]
+    async fn test_manual_close() -> Result<(), Error> {
+        let file = TempFile::new().await?;
+
+        // The file exists.
+        let file_path = file.file_path().clone();
+        assert!(tokio::fs::metadata(file_path.clone()).await.is_ok());
+
+        // Deletes the directory.
+        file.close().await?;
+
+        assert!(tokio::fs::metadata(file_path).await.is_err());
+        Ok(())
     }
 }
