@@ -326,19 +326,6 @@ impl TempDir {
     }
 }
 
-impl TempDirCore {
-    /// Attempt to close and remove this directory.
-    pub async fn close(self) -> Result<(), Error> {
-        // Ensure we don't drop borrowed directories.
-        if self.ownership != Ownership::Owned {
-            return Ok(());
-        }
-
-        // Using remove_dir_all to delete all content recursively.
-        Ok(tokio::fs::remove_dir_all(&self.path).await?)
-    }
-}
-
 /// Ensures the file handles are closed before the core reference is freed.
 /// If the core reference would be freed while handles are still open, it is
 /// possible that the underlying file cannot be deleted.
@@ -433,21 +420,25 @@ mod tests {
     async fn test_files_in_dir() -> Result<(), Error> {
         let dir = TempDir::new().await?;
         let file = TempFile::new_in(&dir).await?;
+        let file2 = TempFile::new_in(&dir).await?;
 
         // The directory exists.
         let dir_path = dir.dir_path().clone();
         assert!(tokio::fs::metadata(dir_path.clone()).await.is_ok());
 
-        // The file exists.
+        // The files exists.
         let file_path = file.file_path().clone();
+        let file_path2 = file2.file_path().clone();
         assert!(tokio::fs::metadata(file_path.clone()).await.is_ok());
+        assert!(tokio::fs::metadata(file_path2.clone()).await.is_ok());
 
         // Deletes the directory.
         drop(dir);
 
-        // The file is gone (even though it is still open).
+        // The files are gone (even though they are still open).
         // TODO: This may cause trouble on Windows as Windows locks files when open.
         assert!(tokio::fs::metadata(file_path).await.is_err());
+        assert!(tokio::fs::metadata(file_path2).await.is_err());
 
         // The directory is gone.
         assert!(tokio::fs::metadata(dir_path).await.is_err());
