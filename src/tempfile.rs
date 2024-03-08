@@ -30,9 +30,6 @@
 // Document crate features on docs.rs.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 // Required for dropping the file.
-#![allow(unsafe_code)]
-#[cfg(feature = "async-trait")]
-use async_trait::async_trait;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
 use std::io::{IoSlice, SeekFrom};
@@ -315,27 +312,6 @@ impl TempFile {
         Self::new_internal(path, ownership).await
     }
 
-    /// Attempts to close and remove this file.
-    ///
-    /// ## Returns
-    /// * `Ok(true)` if the file was deleted
-    /// * `Ok(false)` if the file was not deleted because it is still used
-    /// * `Err(_)` if deletion of the file failed (e.g. due to file locks on Windows)
-    pub async fn close(mut self) -> Result<bool, Error> {
-        // Ensure all file handles are closed before we attempt to delete the file itself via core.
-        drop(unsafe { ManuallyDrop::take(&mut self.file) });
-
-        // Take core out of self and attempt to unwrap the Arc. This only succeeds if we
-        // are the last instance pointing at it.
-        let core = unsafe { ManuallyDrop::take(&mut self.core) };
-        if let Ok(core) = Arc::try_unwrap(core) {
-            core.close().await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
     /// Returns the path of the underlying temporary file.
     pub fn file_path(&self) -> &PathBuf {
         &self.core.path
@@ -422,29 +398,6 @@ impl TempFile {
     #[inline(always)]
     fn default_dir() -> PathBuf {
         std::env::temp_dir()
-    }
-}
-
-#[cfg(feature = "async-trait")]
-#[cfg_attr(docsrs, doc(cfg(feature = "async-trait")))]
-#[async_trait]
-impl crate::AsyncClose for TempFile {
-    async fn close(self) -> Result<(), Error> {
-        self.close()
-    }
-}
-
-impl TempFileCore {
-    /// Attempt to close and remove this file.
-    pub async fn close(mut self) -> Result<(), Error> {
-        // Ensure we don't drop borrowed directories.
-        if self.ownership != Ownership::Owned {
-            return Ok(());
-        }
-
-        // Closing the file handle first, as otherwise the file might not be deleted.
-        let _file = unsafe { ManuallyDrop::take(&mut self.file) };
-        Ok(tokio::fs::remove_file(&self.path).await?)
     }
 }
 

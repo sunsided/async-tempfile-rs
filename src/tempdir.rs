@@ -1,8 +1,6 @@
 #[cfg(not(feature = "uuid"))]
 use crate::RandomName;
 use crate::{Error, Ownership};
-#[cfg(feature = "async-trait")]
-use async_trait::async_trait;
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::mem::ManuallyDrop;
@@ -275,27 +273,6 @@ impl TempDir {
         Self::new_internal(path, ownership).await
     }
 
-    /// Attempts to close and remove this directory.
-    ///
-    /// ## Returns
-    /// * `Ok(true)` if the directory was deleted
-    /// * `Ok(false)` if the directory was not deleted because it is still used
-    /// * `Err(_)` if deletion of the directory failed (e.g. due to file locks on Windows)
-    pub async fn close(mut self) -> Result<bool, Error> {
-        // Ensure all directory handles are closed before we attempt to delete the directory itself via core.
-        drop(unsafe { ManuallyDrop::take(&mut self.dir) });
-
-        // Take core out of self and attempt to unwrap the Arc. This only succeeds if we
-        // are the last instance pointing at it.
-        let core = unsafe { ManuallyDrop::take(&mut self.core) };
-        if let Ok(core) = Arc::try_unwrap(core) {
-            core.close().await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
     /// Returns the path of the underlying temporary directory.
     pub fn dir_path(&self) -> &PathBuf {
         &self.core.path
@@ -359,15 +336,6 @@ impl TempDirCore {
 
         // Using remove_dir_all to delete all content recursively.
         Ok(tokio::fs::remove_dir_all(&self.path).await?)
-    }
-}
-
-#[cfg(feature = "async-trait")]
-#[cfg_attr(docsrs, doc(cfg(feature = "async-trait")))]
-#[async_trait]
-impl crate::AsyncClose for TempDir {
-    async fn close(self) -> Result<(), Error> {
-        self.close()
     }
 }
 

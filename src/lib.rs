@@ -43,9 +43,6 @@ use std::fmt::Debug;
 pub use tempdir::TempDir;
 pub use tempfile::TempFile;
 
-#[cfg(feature = "async-trait")]
-use async_trait::async_trait;
-
 /// Determines the ownership of a temporary file or directory.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Ownership {
@@ -55,12 +52,4 @@ pub enum Ownership {
     /// The file or directory is borrowed by [`TempFile`] and will be left untouched
     /// when the last reference to it is dropped.
     Borrowed,
-}
-
-#[cfg(feature = "async-trait")]
-#[cfg_attr(docsrs, doc(cfg(feature = "async-trait")))]
-#[async_trait]
-pub trait AsyncClose {
-    /// Attempt to close and remove this directory.
-    async fn close(self) -> Result<(), Error>;
 }

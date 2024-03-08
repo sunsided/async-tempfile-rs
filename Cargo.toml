@@ -14,14 +14,12 @@ edition = "2021"
 [features]
 default = []
 uuid = ["dep:uuid"]
-async-trait = ["dep:async-trait"]
 
 [[test]]
 name = "tests"
 path = "tests/tests.rs"
 
 [dependencies]
-async-trait = { version = "0.1.77", optional = true }
 tokio = { version = "1.36.0", features = ["fs"] }
 uuid = { version = "1.7.0", features = ["v4"], optional = true }
 

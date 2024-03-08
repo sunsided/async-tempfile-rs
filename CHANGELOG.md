@@ -8,9 +8,6 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Added `TempDir` for automatically deleted temporary directories.
-- Added `close` methods to `TempFile` and `TempDir` allow for manual file system interactions.
-- Added `AsyncClose` trait for manual closing / deletion of `AsyncFile` and `AsyncDir` instances.
-  This is gated behind the `async-trait` crate feature and disabled by default.
 
 ## [0.5.0] - 2023-12-06
 
