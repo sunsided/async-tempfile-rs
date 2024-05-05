@@ -13,6 +13,7 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Internal
 
 - Refactored temporary file name generation.
+- Run tests on Linux, MacOS and Windows.
 
 ### Changed
 
