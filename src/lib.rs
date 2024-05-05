@@ -34,14 +34,12 @@
 
 mod errors;
 mod random_name;
-mod tempdir;
 mod tempfile;
 
 pub use errors::Error;
 #[cfg(not(feature = "uuid"))]
 pub(crate) use random_name::RandomName;
 use std::fmt::Debug;
-pub use tempdir::TempDir;
 pub use tempfile::TempFile;
 
 /// Determines the ownership of a temporary file or directory.
