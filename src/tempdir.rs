@@ -423,7 +423,7 @@ mod tests {
         let dir_path = dir.dir_path().clone();
         assert!(tokio::fs::metadata(dir_path.clone()).await.is_ok());
 
-        // The files exists.
+        // The files exist.
         let file_path = file.file_path().clone();
         let file_path2 = file2.file_path().clone();
         assert!(tokio::fs::metadata(file_path.clone()).await.is_ok());
