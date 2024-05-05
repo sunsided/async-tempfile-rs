@@ -23,11 +23,15 @@ impl RandomName {
             name: format!("{}{}{:x}{:x}{:x}", prefix, pid, marker, secs, subsec_nanos),
         }
     }
+
+    pub fn as_str(&self) -> &str {
+        self.name.as_str()
+    }
 }
 
 impl AsRef<str> for RandomName {
     fn as_ref(&self) -> &str {
-        &self.name
+        self.as_str()
     }
 }
 
@@ -37,7 +41,10 @@ mod tests {
 
     #[test]
     fn test_random_name() {
-        let name = RandomName::new("test");
-        assert!(name.as_ref().starts_with("test"))
+        let first = RandomName::new("test");
+        let second = RandomName::new("test");
+        assert!(first.as_str().starts_with("test"));
+        assert!(second.as_str().starts_with("test"));
+        assert_ne!(first.as_str(), second.as_str());
     }
 }
