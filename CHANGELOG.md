@@ -10,6 +10,10 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - [#7](https://github.com/sunsided/async-tempfile-rs/pull/7):
   Added `TempDir` for automatically deleted temporary directories.
 
+### Internal
+
+- Refactored temporary file name generation.
+
 ### Changed
 
 - Changed function signatures to take `Borrow<Path>` instead of `PathBuf`.
