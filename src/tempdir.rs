@@ -327,7 +327,6 @@ impl TempDir {
 /// If the core reference would be freed while handles are still open, it is
 /// possible that the underlying file cannot be deleted.
 impl Drop for TempDir {
-    /// See also [`TempDir::close`].
     fn drop(&mut self) {
         // Ensure all directory handles are closed before we attempt to delete the directory itself via core.
         drop(unsafe { ManuallyDrop::take(&mut self.dir) });

@@ -406,7 +406,6 @@ impl TempFile {
 /// If the core reference would be freed while handles are still open, it is
 /// possible that the underlying file cannot be deleted.
 impl Drop for TempFile {
-    /// See also [`TempFile::close`].
     fn drop(&mut self) {
         // Ensure all file handles are closed before we attempt to delete the file itself via core.
         drop(unsafe { ManuallyDrop::take(&mut self.file) });
@@ -417,7 +416,6 @@ impl Drop for TempFile {
 /// Ensures that the underlying file is deleted if this is an owned instance.
 /// If the underlying file is not owned, this operation does nothing.
 impl Drop for TempFileCore {
-    /// See also [`TempFileCore::close`].
     fn drop(&mut self) {
         // Ensure we don't drop borrowed files.
         if self.ownership != Ownership::Owned {
