@@ -20,11 +20,11 @@ name = "tests"
 path = "tests/tests.rs"
 
 [dependencies]
-tokio = { version = "1.37.0", features = ["fs"] }
-uuid = { version = "1.8.0", features = ["v4"], optional = true }
+tokio = { version = "1.38.0", features = ["fs"] }
+uuid = { version = "1.9.1", features = ["v4"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "1.37.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros"] }
 tokio-test = "0.4.4"
 
 [package.metadata.docs.rs]
