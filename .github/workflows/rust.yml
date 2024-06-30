@@ -78,7 +78,7 @@ jobs:
         run: cargo llvm-cov nextest --all-features --lcov --output-path lcov.info
 
   build-others:
-    name: Build on ${{ matrix-os }}
+    name: Build on ${{ matrix.os }}
     needs:
       - build-linux
       - codecov
