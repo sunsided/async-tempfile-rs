@@ -56,6 +56,15 @@ jobs:
         run: cargo build --verbose ${{ join(matrix.features, ' ') }}
       - name: Run doctests
         run: cargo test --doc --verbose ${{ join(matrix.features, ' ') }}
+      - name: Run regular tests
+        run: cargo test --tests --verbose ${{ join(matrix.features, ' ') }}
+
+  codecov:
+    needs:
+      - lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -64,11 +73,12 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
       - name: Generate code coverage
-        run: cargo llvm-cov nextest ${{ join(matrix.features, ' ') }} --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest --all-features --lcov --output-path lcov.info
 
   build-others:
     needs:
       - build-linux
+      - codecov
       - docs
     runs-on: ${{ matrix.os }}
     strategy:
