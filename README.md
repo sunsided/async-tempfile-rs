@@ -1,5 +1,9 @@
 # async-tempfile
 
+[![Crates.io](https://img.shields.io/crates/v/async-tempfile)](https://crates.io/crates/async-tempfile)
+[![Crates.io](https://img.shields.io/crates/l/async-tempfile)](https://crates.io/crates/async-tempfile)
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/sunsided/async-tempfile-rs/rust.yml)
+[![docs.rs](https://img.shields.io/docsrs/async-tempfile)](https://docs.rs/async-tempfile/)
 [![codecov](https://codecov.io/gh/sunsided/async-tempfile-rs/graph/badge.svg?token=LSY85I6M8Y)](https://codecov.io/gh/sunsided/async-tempfile-rs)
 
 Provides the `TempFile` struct, an asynchronous wrapper based on `tokio::fs`
