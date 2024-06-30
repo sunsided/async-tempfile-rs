@@ -42,6 +42,7 @@ jobs:
         run: cargo doc --all-features
 
   build-linux:
+    name: Build on Linux
     needs:
       - lint
     runs-on: ubuntu-latest
@@ -60,6 +61,7 @@ jobs:
         run: cargo test --tests --verbose ${{ join(matrix.features, ' ') }}
 
   codecov:
+    name: Code Coverage
     needs:
       - lint
     runs-on: ubuntu-latest
@@ -76,6 +78,7 @@ jobs:
         run: cargo llvm-cov nextest --all-features --lcov --output-path lcov.info
 
   build-others:
+    name: Build on ${{ matrix-os }}
     needs:
       - build-linux
       - codecov
