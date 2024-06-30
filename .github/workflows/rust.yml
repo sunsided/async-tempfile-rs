@@ -54,10 +54,17 @@ jobs:
         run: cargo clippy ${{ join(matrix.features, ' ') }}
       - name: Build
         run: cargo build --verbose ${{ join(matrix.features, ' ') }}
-      - name: Run tests
-        run: cargo test --tests --verbose ${{ join(matrix.features, ' ') }}
       - name: Run doctests
         run: cargo test --doc --verbose ${{ join(matrix.features, ' ') }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+      - name: Generate code coverage
+        run: cargo llvm-cov nextest ${{ join(matrix.features, ' ') }} --lcov --output-path lcov.info
 
   build-others:
     needs:
