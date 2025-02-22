@@ -372,6 +372,29 @@ impl TempFile {
         self.core.ownership
     }
 
+    /// Asynchronously drops the TempFile, ensuring any resources are properly released.
+    /// This is useful for explicitly managing the lifecycle of the TempFile
+    /// in an asynchronous context.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use async_tempfile::{TempFile, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// let path = file.file_path().to_path_buf();
+    /// assert!(path.is_file());
+    ///
+    /// file.drop_async().await; // Explicitly drop the TempFile
+    ///
+    /// assert!(!path.exists());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub async fn drop_async(self) {
+        tokio::task::spawn_blocking(move || drop(self)).await.ok();
+    }
+    
     async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
         let path = path.borrow();
 

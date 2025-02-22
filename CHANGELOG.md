@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2025-02-22
+
+[0.7.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/v0.7.0
+
+### Added
+
+- Added the `drop_async` functions to provide controlled and `async` dropping.
+
 ## [0.6.0] - 2024-06-30
 
 [0.6.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/v0.6.0
