@@ -394,7 +394,7 @@ impl TempFile {
     pub async fn drop_async(self) {
         tokio::task::spawn_blocking(move || drop(self)).await.ok();
     }
-    
+
     async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
         let path = path.borrow();
 

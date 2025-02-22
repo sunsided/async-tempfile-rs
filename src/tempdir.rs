@@ -301,10 +301,10 @@ impl TempDir {
         self.core.ownership
     }
 
-    /// Asynchronously drops the [`TempDir`] instance by moving the drop operation 
+    /// Asynchronously drops the [`TempDir`] instance by moving the drop operation
     /// to a blocking thread, avoiding potential blocking of the async runtime.
     ///
-    /// This method is useful in cases where manually handling the blocking drop 
+    /// This method is useful in cases where manually handling the blocking drop
     /// within an async context is required.
     ///
     /// ## Example
@@ -325,7 +325,7 @@ impl TempDir {
     pub async fn drop_async(self) {
         tokio::task::spawn_blocking(move || drop(self)).await.ok();
     }
-    
+
     async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
         // Create the directory and all its parents.
         tokio::fs::create_dir_all(path.borrow()).await?;
