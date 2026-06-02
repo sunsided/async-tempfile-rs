@@ -453,7 +453,7 @@ impl TempDir {
         // composed name escape `root` (`../` traversal, or an absolute prefix
         // replacing it via `Path::join`).
         if !crate::affix_is_safe(prefix) || !crate::affix_is_safe(suffix) {
-            return Err(Error::InvalidDirectory);
+            return Err(Error::InvalidAffix);
         }
         let mut last_err = None;
         for _ in 0..MAX_NAME_ATTEMPTS {

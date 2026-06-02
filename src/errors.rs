@@ -7,6 +7,13 @@ pub enum Error {
     InvalidDirectory,
     /// An invalid or missing file was specified.
     InvalidFile,
+    /// A name affix (prefix or suffix) contained a path separator.
+    ///
+    /// Affixes are composed into a single path component
+    /// (`{prefix}{random}{suffix}`); a separator would let the name escape the
+    /// target directory, so such affixes are rejected before any filesystem
+    /// access. The target directory itself is unaffected (and still valid).
+    InvalidAffix,
     /// An I/O error occurred.
     Io(std::io::Error),
 }
@@ -16,6 +23,9 @@ impl Display for Error {
         match self {
             Self::InvalidDirectory => write!(f, "An invalid directory was specified"),
             Self::InvalidFile => write!(f, "An invalid file name was specified"),
+            Self::InvalidAffix => {
+                write!(f, "A name prefix or suffix contained a path separator")
+            }
             Self::Io(e) => Display::fmt(e, f),
         }
     }

@@ -521,7 +521,7 @@ impl TempFile {
         // composed name escape `dir` (`../` traversal, or an absolute prefix
         // replacing it via `Path::join`).
         if !crate::affix_is_safe(prefix) || !crate::affix_is_safe(suffix) {
-            return Err(Error::InvalidFile);
+            return Err(Error::InvalidAffix);
         }
         let mut last_err = None;
         for _ in 0..MAX_NAME_ATTEMPTS {

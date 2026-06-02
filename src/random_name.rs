@@ -99,5 +99,13 @@ mod tests {
         assert!(!crate::affix_is_safe("../"));
         assert!(!crate::affix_is_safe("a/b"));
         assert!(!crate::affix_is_safe("/etc/passwd"));
+
+        // Backslash is a path separator only on Windows. `is_separator` is
+        // platform-aware, so the expectation differs by target: rejected on
+        // Windows, an ordinary filename character elsewhere.
+        #[cfg(windows)]
+        assert!(!crate::affix_is_safe("a\\b"));
+        #[cfg(not(windows))]
+        assert!(crate::affix_is_safe("a\\b"));
     }
 }
