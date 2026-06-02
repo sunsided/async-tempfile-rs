@@ -449,6 +449,12 @@ impl TempDir {
         if !crate::path_is_dir(root).await {
             return Err(Error::InvalidDirectory);
         }
+        // Affixes are name fragments, not paths: a separator would let the
+        // composed name escape `root` (`../` traversal, or an absolute prefix
+        // replacing it via `Path::join`).
+        if !crate::affix_is_safe(prefix) || !crate::affix_is_safe(suffix) {
+            return Err(Error::InvalidAffix);
+        }
         let mut last_err = None;
         for _ in 0..MAX_NAME_ATTEMPTS {
             let name = format!("{prefix}{}{suffix}", Self::random_core_name());
