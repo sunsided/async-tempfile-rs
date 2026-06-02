@@ -1,39 +1,61 @@
 #[cfg(not(feature = "uuid"))]
 use crate::RandomName;
-use crate::{Error, Ownership};
+use crate::{AtomicOwnership, Error, Ownership, PersistError};
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
-use std::mem::ManuallyDrop;
+use std::io::ErrorKind;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-const DIR_PREFIX: &str = "atmpd_";
+pub(crate) const DIR_PREFIX: &str = "atmpd_";
+
+/// Maximum number of attempts to find a free name when creating a directory
+/// with a randomly generated, collision-resistant name.
+const MAX_NAME_ATTEMPTS: usize = 16;
+
+/// How the underlying directory should be created.
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum DirCreateMode {
+    /// Create a brand-new directory, failing if it already exists. Used for
+    /// unpredictable, auto-generated names so two temporaries never share a dir.
+    Exclusive,
+    /// Create the directory and any missing parents (idempotent if it exists).
+    /// Used for user-supplied names, preserving historic behavior.
+    CreateAll,
+    /// Do not create; the directory is expected to already exist. Used by
+    /// `from_existing`.
+    OpenExisting,
+}
 
 /// A named temporary directory that will be cleaned automatically
 /// after the last reference to it is dropped.
 pub struct TempDir {
-    /// A local reference to the directory.
-    dir: ManuallyDrop<PathBuf>,
+    /// A local copy of the directory path. Unlike [`crate::TempFile`]'s file
+    /// handle there is no OS resource to release here, so field drop order does
+    /// not affect deletion; the field is laid out before `core` purely to mirror
+    /// the `TempFile` layout.
+    dir: PathBuf,
 
     /// A shared pointer to the owned (or non-owned) directory.
     /// The `Arc` ensures that the enclosed dir is kept alive
     /// until all references to it are dropped.
-    core: ManuallyDrop<Arc<TempDirCore>>,
+    core: Arc<TempDirCore>,
 }
 
-/// The instance that tracks the temporary file.
-/// If dropped, the file will be deleted.
+/// The instance that tracks the temporary directory.
+/// If dropped, the directory will be deleted.
 struct TempDirCore {
-    /// The path of the contained file.
+    /// The path of the contained directory.
     path: PathBuf,
 
-    /// A hacky approach to allow for "non-owned" files.
-    /// If set to `Ownership::Owned`, the file specified in `path` will be deleted
-    /// when this instance is dropped. If set to `Ownership::Borrowed`, the file will be kept.
-    ownership: Ownership,
+    /// Whether the directory specified in `path` is owned (and deleted on drop)
+    /// or merely borrowed. Stored atomically because it is read from `Drop`,
+    /// which must never block on a lock, and mutated by
+    /// `keep`/`persist`/`drop_async`.
+    ownership: AtomicOwnership,
 }
 
 impl TempDir {
@@ -77,7 +99,7 @@ impl TempDir {
     /// # use async_tempfile::{TempDir, Error};
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
-    /// let dir = TempDir::new_with_name("temporary.dir").await?;
+    /// let dir = TempDir::new_with_name("new_with_name_example.dir").await?;
     ///
     /// // The directory exists.
     /// let dir_path = dir.dir_path().clone();
@@ -132,6 +154,9 @@ impl TempDir {
     /// Creates a new temporary directory in the specified location.
     /// When the instance goes out of scope, the directory will be deleted.
     ///
+    /// The directory is created with a collision-resistant, unpredictable name
+    /// using an exclusive create, so it never reuses an existing directory.
+    ///
     /// ## Crate Features
     ///
     /// * `uuid` - When the `uuid` crate feature is enabled, a random UUIDv4 is used to
@@ -162,17 +187,7 @@ impl TempDir {
     /// # Ok::<(), Error>(())
     /// # });
     pub async fn new_in<P: Borrow<Path>>(root_dir: P) -> Result<Self, Error> {
-        #[cfg(feature = "uuid")]
-        {
-            let id = Uuid::new_v4();
-            Self::new_with_uuid_in(id, root_dir).await
-        }
-
-        #[cfg(not(feature = "uuid"))]
-        {
-            let name = RandomName::new(DIR_PREFIX);
-            Self::new_with_name_in(name, root_dir).await
-        }
+        Self::create_with_affixes(root_dir.borrow(), DIR_PREFIX, "").await
     }
 
     /// Creates a new temporary directory in the specified location.
@@ -190,7 +205,7 @@ impl TempDir {
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
     /// let path = std::env::temp_dir();
-    /// let dir = TempDir::new_with_name_in("temporary.dir", path).await?;
+    /// let dir = TempDir::new_with_name_in("new_with_name_in_example.dir", path).await?;
     ///
     /// // The directory exists.
     /// let dir_path = dir.dir_path().clone();
@@ -208,14 +223,12 @@ impl TempDir {
         name: N,
         root_dir: P,
     ) -> Result<Self, Error> {
-        let dir = root_dir.borrow();
-        if !dir.is_dir() {
+        let root = root_dir.borrow();
+        if !crate::path_is_dir(root).await {
             return Err(Error::InvalidDirectory);
         }
-        let file_name = name.as_ref();
-        let mut path = PathBuf::from(dir);
-        path.push(file_name);
-        Self::new_internal(path, Ownership::Owned).await
+        let path = root.join(name.as_ref());
+        Self::new_internal(path, Ownership::Owned, DirCreateMode::CreateAll).await
     }
 
     /// Creates a new directory file in the specified location.
@@ -251,8 +264,8 @@ impl TempDir {
     #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
     pub async fn new_with_uuid_in<P: Borrow<Path>>(uuid: Uuid, root_dir: P) -> Result<Self, Error> {
-        let file_name = format!("{}{}", DIR_PREFIX, uuid);
-        Self::new_with_name_in(file_name, root_dir).await
+        let dir_name = format!("{DIR_PREFIX}{uuid}");
+        Self::new_with_name_in(dir_name, root_dir).await
     }
 
     /// Wraps a new instance of this type around an existing directory.
@@ -264,10 +277,32 @@ impl TempDir {
     /// * `path` - The path of the directory to wrap.
     /// * `ownership` - The ownership of the directory.
     pub async fn from_existing(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
-        if !path.is_dir() {
+        if !crate::path_is_dir(&path).await {
             return Err(Error::InvalidDirectory);
         }
-        Self::new_internal(path, ownership).await
+        Self::new_internal(path, ownership, DirCreateMode::OpenExisting).await
+    }
+
+    /// Creates a builder for configuring a new temporary directory
+    /// (prefix, suffix, root) before creating it.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempDir, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let dir = TempDir::builder()
+    ///     .prefix("build_")
+    ///     .create()
+    ///     .await?;
+    ///
+    /// let name = dir.dir_path().file_name().unwrap().to_string_lossy().into_owned();
+    /// assert!(name.starts_with("build_"));
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn builder() -> crate::TempDirBuilder {
+        crate::TempDirBuilder::new()
     }
 
     /// Returns the path of the underlying temporary directory.
@@ -276,9 +311,8 @@ impl TempDir {
     }
 
     /// Creates a new [`TempDir`] instance that shares the same underlying
-    /// file handle as the existing [`TempDir`] instance.
-    /// Reads, writes, and seeks will affect both [`TempDir`] instances simultaneously.
-    #[allow(dead_code)]
+    /// directory as the existing [`TempDir`] instance. The directory is removed
+    /// once the last of the shared instances is dropped.
     pub async fn try_clone(&self) -> Result<TempDir, Error> {
         Ok(TempDir {
             core: self.core.clone(),
@@ -298,14 +332,75 @@ impl TempDir {
     /// # });
     /// ```
     pub fn ownership(&self) -> Ownership {
-        self.core.ownership
+        self.core.ownership.get()
     }
 
-    /// Asynchronously drops the [`TempDir`] instance by moving the drop operation
-    /// to a blocking thread, avoiding potential blocking of the async runtime.
+    /// Disables automatic deletion and returns the path of the underlying
+    /// directory, turning the temporary directory into a permanent one.
     ///
-    /// This method is useful in cases where manually handling the blocking drop
-    /// within an async context is required.
+    /// This affects every clone that shares the same underlying directory: none
+    /// of them will delete it when dropped.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempDir, Error};
+    /// # use tokio::fs;
+    /// # let _ = tokio_test::block_on(async {
+    /// let dir = TempDir::new().await?;
+    /// let path = dir.keep();
+    ///
+    /// // The directory still exists after the handle is dropped.
+    /// assert!(fs::metadata(path.clone()).await.is_ok());
+    /// # fs::remove_dir_all(path).await.ok();
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn keep(self) -> PathBuf {
+        let path = self.core.path.clone();
+        self.core.ownership.set_borrowed();
+        path
+    }
+
+    /// Persists the temporary directory by moving it to `target`, returning the
+    /// new path. The directory will no longer be deleted automatically.
+    ///
+    /// The move is performed with [`tokio::fs::rename`] and therefore must stay
+    /// on the same filesystem (a cross-device move returns an error).
+    ///
+    /// On failure the temporary directory is **not** deleted: it is left at its
+    /// original location and that path is returned in [`PersistError::path`], so
+    /// no data is lost. The caller may re-wrap it with [`TempDir::from_existing`]
+    /// to restore automatic cleanup, or delete it.
+    ///
+    /// ## Arguments
+    ///
+    /// * `target` - The destination path to move the directory to.
+    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, PersistError> {
+        let target = target.as_ref().to_path_buf();
+        match tokio::fs::rename(&self.core.path, &target).await {
+            Ok(()) => {
+                self.core.ownership.set_borrowed();
+                Ok(target)
+            }
+            Err(e) => {
+                // Preserve the caller's data: leave the directory in place and
+                // report where it is, rather than deleting it on the way out.
+                self.core.ownership.set_borrowed();
+                Err(PersistError {
+                    error: Error::Io(e),
+                    path: self.core.path.clone(),
+                })
+            }
+        }
+    }
+
+    /// Asynchronously drops the [`TempDir`] instance, removing the directory via
+    /// [`tokio::fs::remove_dir_all`] without blocking the runtime when this is
+    /// the last reference to an owned directory.
+    ///
+    /// The synchronous `Drop` remains armed as a backstop, so a cancelled or
+    /// panicking `drop_async` still cleans up the directory.
     ///
     /// ## Example
     /// ```
@@ -320,24 +415,91 @@ impl TempDir {
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// # });
     /// ```
-    ///
-    /// Note: This function spawns a blocking task for the drop operation.
     pub async fn drop_async(self) {
-        tokio::task::spawn_blocking(move || drop(self)).await.ok();
+        let TempDir { dir, core } = self;
+        drop(dir);
+
+        let Some(core) = Arc::into_inner(core) else {
+            return;
+        };
+
+        if core.ownership.is_owned() {
+            // Still marked owned: a cancellation or panic at the await point
+            // leaves `core`'s synchronous `Drop` to delete the directory.
+            match tokio::fs::remove_dir_all(&core.path).await {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Leave armed: the synchronous `Drop` below retries removal.
+                Err(_) => {}
+            }
+        }
+
+        drop(core);
     }
 
-    async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
-        // Create the directory and all its parents.
-        tokio::fs::create_dir_all(path.borrow()).await?;
+    /// Creates a directory named `{prefix}{random}{suffix}` with an
+    /// unpredictable, collision-resistant random core, using an exclusive create
+    /// and retrying on the (very unlikely) collision. Shared by `new_in` and
+    /// [`crate::TempDirBuilder`].
+    pub(crate) async fn create_with_affixes(
+        root: &Path,
+        prefix: &str,
+        suffix: &str,
+    ) -> Result<Self, Error> {
+        if !crate::path_is_dir(root).await {
+            return Err(Error::InvalidDirectory);
+        }
+        let mut last_err = None;
+        for _ in 0..MAX_NAME_ATTEMPTS {
+            let name = format!("{prefix}{}{suffix}", Self::random_core_name());
+            match Self::new_internal(root.join(name), Ownership::Owned, DirCreateMode::Exclusive)
+                .await
+            {
+                Ok(dir) => return Ok(dir),
+                Err(Error::Io(e)) if e.kind() == ErrorKind::AlreadyExists => {
+                    last_err = Some(Error::Io(e));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or(Error::InvalidDirectory))
+    }
+
+    /// Generates the unpredictable, collision-resistant random core of a name,
+    /// without any prefix or suffix.
+    fn random_core_name() -> String {
+        #[cfg(feature = "uuid")]
+        {
+            Uuid::new_v4().to_string()
+        }
+
+        #[cfg(not(feature = "uuid"))]
+        {
+            RandomName::new("").as_str().to_string()
+        }
+    }
+
+    async fn new_internal<P: Borrow<Path>>(
+        path: P,
+        ownership: Ownership,
+        mode: DirCreateMode,
+    ) -> Result<Self, Error> {
+        let path = path.borrow();
+
+        match mode {
+            DirCreateMode::Exclusive => tokio::fs::create_dir(path).await?,
+            DirCreateMode::CreateAll => tokio::fs::create_dir_all(path).await?,
+            DirCreateMode::OpenExisting => {}
+        }
 
         let core = TempDirCore {
-            ownership,
-            path: PathBuf::from(path.borrow()),
+            ownership: AtomicOwnership::new(ownership),
+            path: PathBuf::from(path),
         };
 
         Ok(Self {
-            dir: ManuallyDrop::new(PathBuf::from(path.borrow())),
-            core: ManuallyDrop::new(Arc::new(core)),
+            dir: PathBuf::from(path),
+            core: Arc::new(core),
         })
     }
 
@@ -348,31 +510,19 @@ impl TempDir {
     }
 }
 
-/// Ensures the file handles are closed before the core reference is freed.
-/// If the core reference would be freed while handles are still open, it is
-/// possible that the underlying file cannot be deleted.
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        // Ensure all directory handles are closed before we attempt to delete the directory itself via core.
-        drop(unsafe { ManuallyDrop::take(&mut self.dir) });
-        drop(unsafe { ManuallyDrop::take(&mut self.core) });
-    }
-}
-
 /// Ensures that the underlying directory is deleted if this is an owned instance.
 /// If the underlying directory is not owned, this operation does nothing.
 impl Drop for TempDirCore {
-    /// See also [`TempDirCore::close`].
     fn drop(&mut self) {
-        // Ensure we don't drop borrowed directories.
-        if self.ownership != Ownership::Owned {
+        // Ensure we don't drop borrowed directories. Read via the lock-free
+        // atomic: `Drop` may run on a runtime worker thread and must never block.
+        if !self.ownership.is_owned() {
             return;
         }
 
-        // TODO: Use asynchronous variant if running in an async context.
-        // Note that if TempDir is used from the executor's handle,
-        //      this may block the executor itself.
-        // Using remove_dir_all to delete all content recursively.
+        // Synchronous on purpose: `Drop` must not re-enter the async runtime.
+        // Using remove_dir_all to delete all content recursively. `drop_async`
+        // provides an async deletion path at an explicit await point.
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }

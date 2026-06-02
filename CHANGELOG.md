@@ -3,6 +3,40 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-06-02
+
+[0.8.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/v0.8.0
+
+### Added
+
+- [#11](https://github.com/sunsided/async-tempfile-rs/issues/11):
+  Added `TempFile::builder()` and `TempDir::builder()` for configuring the name
+  prefix, suffix and target directory before creation.
+- [#12](https://github.com/sunsided/async-tempfile-rs/issues/12):
+  Added `keep` to disable automatic deletion and `persist` to move a temporary
+  file or directory to a permanent location. On failure `persist` leaves the
+  temporary intact and reports its path via `PersistError` (see below).
+- [#1](https://github.com/sunsided/async-tempfile-rs/issues/1):
+  `drop_async` now removes the file or directory via `tokio::fs` directly when it
+  is the sole owner, rather than offloading a synchronous drop to a blocking
+  thread. The synchronous `Drop` remains an always-armed backstop.
+
+### Changed
+
+- The crate now declares `#![forbid(unsafe_code)]`. The previous `ManuallyDrop` /
+  `unsafe` drop machinery was replaced by safe code that relies on struct field
+  drop order to close the file handle before the file is deleted.
+- `persist` now returns a `PersistError` on failure that carries the path of
+  the still-intact temporary, so a failed move (for example cross-device) no
+  longer deletes the data. The local handle is closed before the rename so the
+  move also succeeds on Windows.
+- Automatically generated temporary names are now unpredictable (seeded from the
+  OS RNG via `RandomState`, with a per-process counter for guaranteed local
+  uniqueness) and created with an exclusive (`O_EXCL`) create, closing a
+  predictable-name / preexisting-file race. User-supplied names keep their
+  previous create-or-open behavior.
+- Bumped the crate to Rust edition 2024 with a declared MSRV of 1.85.
+
 ## [0.7.0] - 2025-02-22
 
 [0.7.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/v0.7.0
