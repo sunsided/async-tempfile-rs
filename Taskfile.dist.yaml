@@ -1,0 +1,168 @@
+# Taskfile for async-tempfile (https://taskfile.dev)
+# Mirrors the GitHub `rust.yml` CI jobs so `task ci` ≈ the pipeline locally.
+version: '3'
+
+vars:
+  CARGO_PRECOND: command -v cargo
+  CARGO_MSG: "cargo not found — install Rust from https://rustup.rs/"
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list --sort=none
+    silent: true
+
+  fmt:
+    desc: Format all Rust sources
+    aliases: [format]
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo fmt --all
+
+  fmt:check:
+    desc: Check formatting without modifying files
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo fmt --all -- --check
+
+  lint:
+    desc: Run clippy with all features (warnings as errors)
+    aliases: [lint:check]
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  lint:fix:
+    desc: Auto-fix clippy lints, then format
+    aliases: [fix]
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+      - task: fmt
+
+  check:
+    desc: All static checks (format check, clippy, type-check)
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - cargo check --all-targets --all-features
+
+  build:
+    desc: Build the crate (default features)
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo build --all-targets
+
+  build:allfeatures:
+    desc: Build with all features
+    cmds:
+      - cargo build --all-targets --all-features
+
+  build:nofeatures:
+    desc: Build with no default features
+    cmds:
+      - cargo build --all-targets --no-default-features
+
+  test:
+    desc: Run the test suite with all features
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    cmds:
+      - cargo test --all-features {{.CLI_ARGS}}
+
+  test:nofeatures:
+    desc: Run the test suite with no default features
+    cmds:
+      - cargo test --no-default-features {{.CLI_ARGS}}
+
+  test:doc:
+    desc: Run doctests with all features
+    cmds:
+      - cargo test --doc --all-features
+
+  test:loom:
+    desc: Run the loom concurrency model-checker (nightly tier)
+    preconditions:
+      - sh: '{{.CARGO_PRECOND}}'
+        msg: '{{.CARGO_MSG}}'
+    env:
+      RUSTFLAGS: --cfg loom
+    cmds:
+      - cargo test --test loom_ownership
+
+  cov:
+    desc: Generate code coverage via cargo-llvm-cov + nextest (mirrors CI)
+    preconditions:
+      - sh: command -v cargo-llvm-cov
+        msg: "cargo-llvm-cov not found — cargo install cargo-llvm-cov"
+      - sh: command -v cargo-nextest
+        msg: "cargo-nextest not found — cargo install cargo-nextest"
+    cmds:
+      - cargo llvm-cov nextest --all-features --lcov --output-path lcov.info
+
+  doc:
+    desc: Build rustdoc with all features
+    cmds:
+      - cargo doc --all-features --no-deps
+
+  doc:open:
+    desc: Build and open rustdoc in the browser
+    cmds:
+      - cargo doc --all-features --no-deps --open
+
+  spell:
+    desc: Check spelling with codespell (mirrors CI)
+    preconditions:
+      - sh: command -v codespell
+        msg: "codespell not found — pip install codespell"
+    cmds:
+      - codespell
+
+  fuzz:
+    desc: Run a fuzz target (nightly + cargo-fuzz; requires a fuzz/ crate)
+    preconditions:
+      - sh: command -v cargo-fuzz
+        msg: "cargo-fuzz not found — cargo install cargo-fuzz"
+      - sh: rustup toolchain list | grep -q nightly
+        msg: "Rust nightly toolchain required — rustup toolchain install nightly"
+    cmds:
+      - cargo +nightly fuzz run {{.CLI_ARGS}}
+
+  fuzz:list:
+    desc: List available fuzz targets
+    preconditions:
+      - sh: command -v cargo-fuzz
+        msg: "cargo-fuzz not found — cargo install cargo-fuzz"
+    cmds:
+      - cargo +nightly fuzz list
+
+  ci:
+    desc: Run the full CI sequence locally (format, lint, build, tests, docs)
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: build:nofeatures
+      - task: build:allfeatures
+      - task: test
+      - task: test:nofeatures
+      - task: test:doc
+      - task: doc
+
+  clean:
+    desc: Remove cargo build artifacts
+    status:
+      - test ! -d target
+    cmds:
+      - cargo clean
