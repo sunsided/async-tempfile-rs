@@ -45,6 +45,66 @@ async fn keep_affects_clones_sharing_the_core() {
 }
 
 #[tokio::test]
+async fn close_deletes_owned_file_and_reports_ok() {
+    let file = TempFile::new().await.unwrap();
+    let path = file.file_path().clone();
+    assert!(path.is_file());
+
+    file.close().expect("closing an owned file should succeed");
+
+    assert!(!path.exists(), "close must delete the owned file");
+}
+
+#[tokio::test]
+async fn close_via_clone_leaves_file_for_remaining_reference() {
+    let file = TempFile::new().await.unwrap();
+    let clone = file.open_rw().await.unwrap();
+    let path = file.file_path().clone();
+
+    // Closing one handle while another reference is alive must not delete the
+    // file: cleanup falls to the surviving reference's `Drop`.
+    file.close().expect("close with live clones returns Ok");
+    assert!(
+        path.is_file(),
+        "file must survive while a clone references it"
+    );
+
+    drop(clone);
+    assert!(!path.exists(), "last reference dropping deletes the file");
+}
+
+#[tokio::test]
+async fn close_on_borrowed_file_is_a_noop() {
+    let file = TempFile::new().await.unwrap();
+    let path = file.keep(); // disarm: now borrowed
+    let borrowed = TempFile::from_existing(path.clone(), Ownership::Borrowed)
+        .await
+        .unwrap();
+
+    borrowed
+        .close()
+        .expect("closing a borrowed file returns Ok");
+    assert!(path.is_file(), "borrowed file must not be deleted by close");
+
+    tokio::fs::remove_file(path).await.unwrap();
+}
+
+#[tokio::test]
+async fn close_deletes_owned_dir_recursively() {
+    let dir = TempDir::new().await.unwrap();
+    let path = dir.dir_path().clone();
+    // Leave a file inside so the removal must recurse. `keep()` closes the
+    // handle but leaves the file on disk, so this stays correct on Windows,
+    // where an open handle inside the directory would block `remove_dir_all`.
+    let inner_path = TempFile::new_in(path.as_path()).await.unwrap().keep();
+    assert!(inner_path.is_file());
+
+    dir.close().expect("closing an owned dir should succeed");
+
+    assert!(!path.exists(), "close must remove the dir and its contents");
+}
+
+#[tokio::test]
 async fn persist_moves_and_survives() {
     let file = TempFile::new().await.unwrap();
     let original = file.file_path().clone();

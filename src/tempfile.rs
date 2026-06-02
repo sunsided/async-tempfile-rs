@@ -505,6 +505,65 @@ impl TempFile {
         drop(core);
     }
 
+    /// Closes the file, deleting it when this is the last reference to an owned
+    /// file, and **returns the removal result** so the caller can observe a
+    /// deletion failure - unlike the implicit `Drop`, which has no way to report
+    /// one. This is the synchronous sibling of [`drop_async`](Self::drop_async);
+    /// prefer `drop_async` inside an async context to avoid blocking the runtime
+    /// on the `unlink` syscall.
+    ///
+    /// If other clones still reference the file, cleanup is left to them and
+    /// `Ok(())` is returned. On error the file is left in place and the error is
+    /// returned; no further automatic deletion is attempted (a synchronous retry
+    /// of the same failing syscall would be pointless), so the caller owns the
+    /// file and may inspect, retry, or remove it. This differs from
+    /// [`drop_async`](Self::drop_async), whose synchronous `Drop` backstop is a
+    /// genuinely different deletion mechanism after a possibly-cancelled async
+    /// removal.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use async_tempfile::{TempFile, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// let path = file.file_path().to_path_buf();
+    ///
+    /// file.close()?; // Explicitly close, surfacing any deletion error.
+    ///
+    /// assert!(!path.exists());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn close(self) -> std::io::Result<()> {
+        let TempFile { file, core } = self;
+        // Close the local read-write handle before attempting deletion (matters
+        // on platforms that lock open files, such as Windows).
+        drop(file);
+
+        // Only the sole owner removes the file; otherwise the remaining
+        // references' `Drop` impls handle cleanup.
+        let Some(core) = Arc::into_inner(core) else {
+            return Ok(());
+        };
+
+        if core.ownership.is_owned() {
+            match std::fs::remove_file(&core.path) {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Disarm and surface the error: leaving `core` armed would make
+                // the trailing `Drop` retry the identical syscall for nothing.
+                // The file is left in place for the caller to handle.
+                Err(e) => {
+                    core.ownership.set_borrowed();
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a file named `{prefix}{random}{suffix}` with an unpredictable,
     /// collision-resistant random core, using an exclusive (`O_EXCL`) create and
     /// retrying on the (astronomically unlikely) collision. Shared by `new_in`

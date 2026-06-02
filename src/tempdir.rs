@@ -437,6 +437,61 @@ impl TempDir {
         drop(core);
     }
 
+    /// Closes the directory, removing it (and its contents) when this is the
+    /// last reference to an owned directory, and **returns the removal result**
+    /// so the caller can observe a failure - unlike the implicit `Drop`, which
+    /// has no way to report one. This is the synchronous sibling of
+    /// [`drop_async`](Self::drop_async); prefer `drop_async` inside an async
+    /// context to avoid blocking the runtime on the removal syscalls.
+    ///
+    /// If other clones still reference the directory, cleanup is left to them
+    /// and `Ok(())` is returned. On error the error is returned and no further
+    /// automatic removal is attempted (a synchronous retry of the same failing
+    /// syscall would be pointless). Because `remove_dir_all` is not atomic, a
+    /// failure may leave the directory partially emptied; the caller owns
+    /// whatever remains and may inspect, retry, or remove it.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use async_tempfile::{TempDir, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let dir = TempDir::new().await?;
+    /// let path = dir.dir_path().to_path_buf();
+    ///
+    /// dir.close()?; // Explicitly close, surfacing any removal error.
+    ///
+    /// assert!(!path.exists());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn close(self) -> std::io::Result<()> {
+        let TempDir { dir, core } = self;
+        drop(dir);
+
+        // Only the sole owner removes the directory; otherwise the remaining
+        // references' `Drop` impls handle cleanup.
+        let Some(core) = Arc::into_inner(core) else {
+            return Ok(());
+        };
+
+        if core.ownership.is_owned() {
+            match std::fs::remove_dir_all(&core.path) {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Disarm and surface the error: leaving `core` armed would make
+                // the trailing `Drop` retry the identical syscall for nothing.
+                // Whatever remains is left for the caller to handle.
+                Err(e) => {
+                    core.ownership.set_borrowed();
+                    return Err(e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a directory named `{prefix}{random}{suffix}` with an
     /// unpredictable, collision-resistant random core, using an exclusive create
     /// and retrying on the (very unlikely) collision. Shared by `new_in` and

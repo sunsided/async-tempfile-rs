@@ -52,5 +52,9 @@ async fn main() {
 
     // Drop it explicitly on an async runtime without blocking the executor.
     file.drop_async().await;
+
+    // `drop_async` consumes `file`, so the following is an *alternative* to the
+    // line above (not an addition): close synchronously and observe any error.
+    //   file.close().unwrap();
 }
 ```
