@@ -65,6 +65,19 @@ pub(crate) async fn path_is_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns `true` if `affix` is safe to splice into a file name.
+///
+/// `prefix`/`suffix` are composed into a single path component
+/// (`{prefix}{random}{suffix}`). A path separator in either would let the
+/// composed name escape the target directory: `Path::join` treats `../` as a
+/// parent traversal and an absolute fragment as a full replacement of the
+/// target. We therefore reject any affix containing a separator
+/// ([`std::path::is_separator`], which is platform-aware: `/` everywhere, plus
+/// `\` on Windows) rather than letting it reach the filesystem.
+pub(crate) fn affix_is_safe(affix: &str) -> bool {
+    !affix.chars().any(std::path::is_separator)
+}
+
 /// Determines the ownership of a temporary file or directory.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Ownership {
