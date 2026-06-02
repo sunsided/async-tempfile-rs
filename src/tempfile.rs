@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 #[cfg(not(feature = "uuid"))]
 use crate::random_name::RandomName;
-use crate::{AtomicOwnership, Error, Ownership};
+use crate::{AtomicOwnership, Error, Ownership, PersistError};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
@@ -230,7 +230,7 @@ impl TempFile {
         dir: P,
     ) -> Result<Self, Error> {
         let dir = dir.borrow();
-        if !dir.is_dir() {
+        if !crate::path_is_dir(dir).await {
             return Err(Error::InvalidDirectory);
         }
         let path = dir.join(name.as_ref());
@@ -286,7 +286,7 @@ impl TempFile {
         path: P,
         ownership: Ownership,
     ) -> Result<Self, Error> {
-        if !path.borrow().is_file() {
+        if !crate::path_is_file(path.borrow()).await {
             return Err(Error::InvalidFile);
         }
         Self::new_internal(path, ownership, CreateMode::OpenExisting).await
@@ -403,11 +403,14 @@ impl TempFile {
     /// path. The file will no longer be deleted automatically.
     ///
     /// The move is performed with [`tokio::fs::rename`] and therefore must stay
-    /// on the same filesystem (a cross-device move returns an I/O error).
+    /// on the same filesystem (a cross-device move returns an error).
     ///
-    /// This is cancellation- and panic-safe: deletion is only disabled *after*
-    /// the rename succeeds, so if the future is dropped or the rename fails, the
-    /// original temporary file is still cleaned up.
+    /// On failure the temporary file is **not** deleted: it is left at its
+    /// original location and that path is returned in [`PersistError::path`], so
+    /// no data is lost on a cross-device or permission error. The caller may
+    /// re-wrap it with [`TempFile::from_existing`] to restore automatic cleanup,
+    /// or delete it. The local handle is closed before the rename so the move
+    /// also succeeds on Windows.
     ///
     /// ## Arguments
     ///
@@ -422,21 +425,34 @@ impl TempFile {
     /// let file = TempFile::new().await?;
     /// let target = std::env::temp_dir().join("persisted_async_tempfile.txt");
     ///
-    /// let path = file.persist(&target).await?;
+    /// let path = file.persist(&target).await.map_err(|e| e.error)?;
     /// assert!(fs::metadata(path.clone()).await.is_ok());
     /// # fs::remove_file(path).await.ok();
     /// # Ok::<(), Error>(())
     /// # });
     /// ```
-    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, Error> {
+    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, PersistError> {
         let target = target.as_ref().to_path_buf();
-        // Backstop ordering: rename first, disarm only on success. If the rename
-        // fails or this future is cancelled, `self` is dropped and its `Drop`
-        // deletes the original temporary file. The persisted target is never
-        // touched by `Drop`, which only ever removes the core's own `path`.
-        tokio::fs::rename(&self.core.path, &target).await?;
-        self.core.ownership.set_borrowed();
-        Ok(target)
+        let TempFile { file, core } = self;
+        // Close our handle before the rename: Windows refuses to move a file
+        // while a handle to it is open.
+        drop(file);
+
+        match tokio::fs::rename(&core.path, &target).await {
+            Ok(()) => {
+                core.ownership.set_borrowed();
+                Ok(target)
+            }
+            Err(e) => {
+                // Preserve the caller's data: leave the temporary in place and
+                // report where it is, rather than deleting it on the way out.
+                core.ownership.set_borrowed();
+                Err(PersistError {
+                    error: Error::Io(e),
+                    path: core.path.clone(),
+                })
+            }
+        }
     }
 
     /// Asynchronously drops the TempFile, ensuring any resources are properly released.
@@ -498,7 +514,7 @@ impl TempFile {
         prefix: &str,
         suffix: &str,
     ) -> Result<Self, Error> {
-        if !dir.is_dir() {
+        if !crate::path_is_dir(dir).await {
             return Err(Error::InvalidDirectory);
         }
         let mut last_err = None;

@@ -39,13 +39,31 @@ mod tempdir;
 mod tempfile;
 
 pub use builder::{TempDirBuilder, TempFileBuilder};
-pub use errors::Error;
+pub use errors::{Error, PersistError};
 #[cfg(not(feature = "uuid"))]
 pub(crate) use random_name::RandomName;
 pub use tempdir::TempDir;
 pub use tempfile::TempFile;
 
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Returns whether `path` is a directory, using async I/O so the calling task
+/// does not block a runtime worker thread on the `stat` syscall.
+pub(crate) async fn path_is_dir(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false)
+}
+
+/// Returns whether `path` is a regular file, using async I/O (see [`path_is_dir`]).
+pub(crate) async fn path_is_file(path: &Path) -> bool {
+    tokio::fs::metadata(path)
+        .await
+        .map(|m| m.is_file())
+        .unwrap_or(false)
+}
 
 /// Determines the ownership of a temporary file or directory.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]

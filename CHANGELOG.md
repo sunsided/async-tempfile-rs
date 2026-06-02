@@ -25,7 +25,11 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The crate now declares `#![forbid(unsafe_code)]`. The previous `ManuallyDrop` /
   `unsafe` drop machinery was replaced by safe code that relies on struct field
-  drop order and an `Option`-held handle.
+  drop order to close the file handle before the file is deleted.
+- `persist` now returns a `PersistError` on failure that carries the path of
+  the still-intact temporary, so a failed move (for example cross-device) no
+  longer deletes the data. The local handle is closed before the rename so the
+  move also succeeds on Windows.
 - Automatically generated temporary names are now unpredictable (seeded from the
   OS RNG via `RandomState`, with a per-process counter for guaranteed local
   uniqueness) and created with an exclusive (`O_EXCL`) create, closing a

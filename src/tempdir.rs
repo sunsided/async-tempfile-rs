@@ -1,6 +1,6 @@
 #[cfg(not(feature = "uuid"))]
 use crate::RandomName;
-use crate::{AtomicOwnership, Error, Ownership};
+use crate::{AtomicOwnership, Error, Ownership, PersistError};
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::io::ErrorKind;
@@ -33,11 +33,10 @@ enum DirCreateMode {
 /// A named temporary directory that will be cleaned automatically
 /// after the last reference to it is dropped.
 pub struct TempDir {
-    /// A local reference to the directory.
-    ///
-    /// Field order matters: `dir` is declared before `core` so the local value
-    /// is dropped before the shared `core` is released and the directory is
-    /// deleted, mirroring [`crate::TempFile`].
+    /// A local copy of the directory path. Unlike [`crate::TempFile`]'s file
+    /// handle there is no OS resource to release here, so field drop order does
+    /// not affect deletion; the field is laid out before `core` purely to mirror
+    /// the `TempFile` layout.
     dir: PathBuf,
 
     /// A shared pointer to the owned (or non-owned) directory.
@@ -225,7 +224,7 @@ impl TempDir {
         root_dir: P,
     ) -> Result<Self, Error> {
         let root = root_dir.borrow();
-        if !root.is_dir() {
+        if !crate::path_is_dir(root).await {
             return Err(Error::InvalidDirectory);
         }
         let path = root.join(name.as_ref());
@@ -278,7 +277,7 @@ impl TempDir {
     /// * `path` - The path of the directory to wrap.
     /// * `ownership` - The ownership of the directory.
     pub async fn from_existing(path: PathBuf, ownership: Ownership) -> Result<Self, Error> {
-        if !path.is_dir() {
+        if !crate::path_is_dir(&path).await {
             return Err(Error::InvalidDirectory);
         }
         Self::new_internal(path, ownership, DirCreateMode::OpenExisting).await
@@ -367,22 +366,33 @@ impl TempDir {
     /// new path. The directory will no longer be deleted automatically.
     ///
     /// The move is performed with [`tokio::fs::rename`] and therefore must stay
-    /// on the same filesystem (a cross-device move returns an I/O error).
+    /// on the same filesystem (a cross-device move returns an error).
     ///
-    /// This is cancellation- and panic-safe: deletion is only disabled *after*
-    /// the rename succeeds, so if the future is dropped or the rename fails, the
-    /// original temporary directory is still cleaned up.
+    /// On failure the temporary directory is **not** deleted: it is left at its
+    /// original location and that path is returned in [`PersistError::path`], so
+    /// no data is lost. The caller may re-wrap it with [`TempDir::from_existing`]
+    /// to restore automatic cleanup, or delete it.
     ///
     /// ## Arguments
     ///
     /// * `target` - The destination path to move the directory to.
-    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, Error> {
+    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, PersistError> {
         let target = target.as_ref().to_path_buf();
-        // Backstop ordering: rename first, disarm only on success. See
-        // `TempFile::persist` for the cancellation-safety reasoning.
-        tokio::fs::rename(&self.core.path, &target).await?;
-        self.core.ownership.set_borrowed();
-        Ok(target)
+        match tokio::fs::rename(&self.core.path, &target).await {
+            Ok(()) => {
+                self.core.ownership.set_borrowed();
+                Ok(target)
+            }
+            Err(e) => {
+                // Preserve the caller's data: leave the directory in place and
+                // report where it is, rather than deleting it on the way out.
+                self.core.ownership.set_borrowed();
+                Err(PersistError {
+                    error: Error::Io(e),
+                    path: self.core.path.clone(),
+                })
+            }
+        }
     }
 
     /// Asynchronously drops the [`TempDir`] instance, removing the directory via
@@ -436,7 +446,7 @@ impl TempDir {
         prefix: &str,
         suffix: &str,
     ) -> Result<Self, Error> {
-        if !root.is_dir() {
+        if !crate::path_is_dir(root).await {
             return Err(Error::InvalidDirectory);
         }
         let mut last_err = None;

@@ -123,23 +123,36 @@ async fn drop_async_cancelled_still_deletes() {
 }
 
 #[tokio::test]
-async fn persist_failure_cleans_up() {
+async fn persist_failure_preserves_file_and_reports_path() {
     let file = TempFile::new().await.unwrap();
-    let path = file.file_path().clone();
+    let original = file.file_path().clone();
 
-    // Target parent directory does not exist → rename fails.
-    let bad_target = path.join("nonexistent").join("subdir").join("target.bin");
-    let result = file.persist(&bad_target).await;
+    // A fresh, non-existent directory under temp_dir() → the rename fails
+    // reliably because the target's parent directory is missing.
+    let missing_dir =
+        std::env::temp_dir().join(format!("async_tempfile_missing_{}", std::process::id()));
+    let _ = tokio::fs::remove_dir_all(&missing_dir).await;
+    let bad_target = missing_dir.join("target.bin");
 
+    let err = file
+        .persist(&bad_target)
+        .await
+        .expect_err("persist into a missing directory must fail");
+
+    // The data is not lost: the temporary still exists at the reported path.
+    assert_eq!(err.path, original);
     assert!(
-        result.is_err(),
-        "persist into a missing directory must fail"
-    );
-    assert!(
-        !path.exists(),
-        "a failed persist must still delete the original temp file"
+        original.exists(),
+        "a failed persist must NOT delete the original temp file"
     );
     assert!(!bad_target.exists());
+
+    // The caller can recover it; re-adopting restores automatic cleanup.
+    let recovered = TempFile::from_existing(original.clone(), Ownership::Owned)
+        .await
+        .unwrap();
+    drop(recovered);
+    assert!(!original.exists());
 }
 
 // ---------------------------------------------------------------------------
