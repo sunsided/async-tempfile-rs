@@ -14,8 +14,8 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prefix, suffix and target directory before creation.
 - [#12](https://github.com/sunsided/async-tempfile-rs/issues/12):
   Added `keep` to disable automatic deletion and `persist` to move a temporary
-  file or directory to a permanent location. Both are cancellation- and
-  panic-safe: deletion is only disabled after the operation succeeds.
+  file or directory to a permanent location. On failure `persist` leaves the
+  temporary intact and reports its path via `PersistError` (see below).
 - [#1](https://github.com/sunsided/async-tempfile-rs/issues/1):
   `drop_async` now removes the file or directory via `tokio::fs` directly when it
   is the sole owner, rather than offloading a synchronous drop to a blocking

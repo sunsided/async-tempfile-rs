@@ -36,6 +36,11 @@ impl From<std::io::Error> for Error {
 /// place at [`PersistError::path`] so the caller can recover the data instead of
 /// losing it. To restore automatic cleanup, re-wrap that path with
 /// `from_existing(path, Ownership::Owned)`.
+///
+/// There is intentionally no `From<PersistError> for Error` conversion: a
+/// blanket `?` would silently drop [`PersistError::path`], the one piece of
+/// information that makes recovery possible. Handle the two fields explicitly,
+/// or use `map_err(|e| e.error)` if you only care about the underlying error.
 #[derive(Debug)]
 pub struct PersistError {
     /// The underlying error that prevented the move (for example a cross-device
@@ -58,11 +63,5 @@ impl Display for PersistError {
 impl std::error::Error for PersistError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.error)
-    }
-}
-
-impl From<PersistError> for Error {
-    fn from(e: PersistError) -> Self {
-        e.error
     }
 }
