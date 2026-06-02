@@ -437,6 +437,55 @@ impl TempDir {
         drop(core);
     }
 
+    /// Closes the directory, removing it (and its contents) when this is the
+    /// last reference to an owned directory, and **returns the removal result**
+    /// so the caller can observe a failure - unlike the implicit `Drop`, which
+    /// has no way to report one. This is the synchronous sibling of
+    /// [`drop_async`](Self::drop_async); prefer `drop_async` inside an async
+    /// context to avoid blocking the runtime on the removal syscalls.
+    ///
+    /// If other clones still reference the directory, cleanup is left to them
+    /// and `Ok(())` is returned. On error the directory is left in place and the
+    /// synchronous `Drop` remains armed as a backstop, so it will retry the
+    /// removal; the returned `Err` is purely informational.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use async_tempfile::{TempDir, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let dir = TempDir::new().await?;
+    /// let path = dir.dir_path().to_path_buf();
+    ///
+    /// dir.close()?; // Explicitly close, surfacing any removal error.
+    ///
+    /// assert!(!path.exists());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn close(self) -> std::io::Result<()> {
+        let TempDir { dir, core } = self;
+        drop(dir);
+
+        // Only the sole owner removes the directory; otherwise the remaining
+        // references' `Drop` impls handle cleanup.
+        let Some(core) = Arc::into_inner(core) else {
+            return Ok(());
+        };
+
+        if core.ownership.is_owned() {
+            match std::fs::remove_dir_all(&core.path) {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Leave armed: dropping `core` below lets `Drop` retry removal.
+                // The error is still surfaced to the caller.
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a directory named `{prefix}{random}{suffix}` with an
     /// unpredictable, collision-resistant random core, using an exclusive create
     /// and retrying on the (very unlikely) collision. Shared by `new_in` and

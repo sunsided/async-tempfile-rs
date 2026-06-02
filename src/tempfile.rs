@@ -505,6 +505,57 @@ impl TempFile {
         drop(core);
     }
 
+    /// Closes the file, deleting it when this is the last reference to an owned
+    /// file, and **returns the removal result** so the caller can observe a
+    /// deletion failure - unlike the implicit `Drop`, which has no way to report
+    /// one. This is the synchronous sibling of [`drop_async`](Self::drop_async);
+    /// prefer `drop_async` inside an async context to avoid blocking the runtime
+    /// on the `unlink` syscall.
+    ///
+    /// If other clones still reference the file, cleanup is left to them and
+    /// `Ok(())` is returned. On error the file is left in place and the
+    /// synchronous `Drop` remains armed as a backstop, so it will retry the
+    /// removal; the returned `Err` is purely informational.
+    ///
+    /// ## Example
+    ///
+    /// ```rust
+    /// # use async_tempfile::{TempFile, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// let path = file.file_path().to_path_buf();
+    ///
+    /// file.close()?; // Explicitly close, surfacing any deletion error.
+    ///
+    /// assert!(!path.exists());
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn close(self) -> std::io::Result<()> {
+        let TempFile { file, core } = self;
+        // Close the local read-write handle before attempting deletion (matters
+        // on platforms that lock open files, such as Windows).
+        drop(file);
+
+        // Only the sole owner removes the file; otherwise the remaining
+        // references' `Drop` impls handle cleanup.
+        let Some(core) = Arc::into_inner(core) else {
+            return Ok(());
+        };
+
+        if core.ownership.is_owned() {
+            match std::fs::remove_file(&core.path) {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Leave armed: dropping `core` below lets `Drop` retry removal.
+                // The error is still surfaced to the caller.
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a file named `{prefix}{random}{suffix}` with an unpredictable,
     /// collision-resistant random core, using an exclusive (`O_EXCL`) create and
     /// retrying on the (astronomically unlikely) collision. Shared by `new_in`
