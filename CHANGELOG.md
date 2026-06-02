@@ -20,6 +20,11 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `drop_async` now removes the file or directory via `tokio::fs` directly when it
   is the sole owner, rather than offloading a synchronous drop to a blocking
   thread. The synchronous `Drop` remains an always-armed backstop.
+- [#15](https://github.com/sunsided/async-tempfile-rs/pull/15):
+  Added `close` to `TempFile` and `TempDir`: a synchronous, error-observable
+  deletion returning `io::Result<()>`, complementing `drop_async`. On a deletion
+  error it disarms automatic cleanup and leaves the file or directory in place
+  for the caller to handle.
 
 ### Changed
 
@@ -35,7 +40,16 @@ This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   uniqueness) and created with an exclusive (`O_EXCL`) create, closing a
   predictable-name / preexisting-file race. User-supplied names keep their
   previous create-or-open behavior.
+- [#14](https://github.com/sunsided/async-tempfile-rs/pull/14):
+  A name `prefix` or `suffix` containing a path separator is now rejected with
+  the new `Error::InvalidAffix`, so a composed name can no longer escape the
+  target directory via `../` traversal or an absolute-path replacement.
 - Bumped the crate to Rust edition 2024 with a declared MSRV of 1.85.
+
+### Internal
+
+- [#16](https://github.com/sunsided/async-tempfile-rs/pull/16):
+  Raised test coverage from ~67% to ~94%.
 
 ## [0.7.0] - 2025-02-22
 
