@@ -445,9 +445,11 @@ impl TempDir {
     /// context to avoid blocking the runtime on the removal syscalls.
     ///
     /// If other clones still reference the directory, cleanup is left to them
-    /// and `Ok(())` is returned. On error the directory is left in place and the
-    /// synchronous `Drop` remains armed as a backstop, so it will retry the
-    /// removal; the returned `Err` is purely informational.
+    /// and `Ok(())` is returned. On error the error is returned and no further
+    /// automatic removal is attempted (a synchronous retry of the same failing
+    /// syscall would be pointless). Because `remove_dir_all` is not atomic, a
+    /// failure may leave the directory partially emptied; the caller owns
+    /// whatever remains and may inspect, retry, or remove it.
     ///
     /// ## Example
     ///
@@ -477,9 +479,13 @@ impl TempDir {
             match std::fs::remove_dir_all(&core.path) {
                 Ok(()) => core.ownership.set_borrowed(),
                 Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
-                // Leave armed: dropping `core` below lets `Drop` retry removal.
-                // The error is still surfaced to the caller.
-                Err(e) => return Err(e),
+                // Disarm and surface the error: leaving `core` armed would make
+                // the trailing `Drop` retry the identical syscall for nothing.
+                // Whatever remains is left for the caller to handle.
+                Err(e) => {
+                    core.ownership.set_borrowed();
+                    return Err(e);
+                }
             }
         }
 

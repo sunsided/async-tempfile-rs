@@ -93,8 +93,11 @@ async fn close_on_borrowed_file_is_a_noop() {
 async fn close_deletes_owned_dir_recursively() {
     let dir = TempDir::new().await.unwrap();
     let path = dir.dir_path().clone();
-    // Drop a file inside so the removal must recurse.
-    let _inner = TempFile::new_in(path.as_path()).await.unwrap();
+    // Leave a file inside so the removal must recurse. `keep()` closes the
+    // handle but leaves the file on disk, so this stays correct on Windows,
+    // where an open handle inside the directory would block `remove_dir_all`.
+    let inner_path = TempFile::new_in(path.as_path()).await.unwrap().keep();
+    assert!(inner_path.is_file());
 
     dir.close().expect("closing an owned dir should succeed");
 

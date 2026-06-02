@@ -95,8 +95,8 @@ pub enum Ownership {
 ///
 /// Lock-free is a hard requirement, not an optimization: the value is read from
 /// `Drop`, which may run on a runtime worker thread and therefore must never
-/// block on a lock. `keep`, `persist`, and `drop_async` flip it to `Borrowed`
-/// to disable automatic deletion.
+/// block on a lock. `keep`, `persist`, `drop_async`, and `close` flip it to
+/// `Borrowed` to disable automatic deletion.
 pub(crate) struct AtomicOwnership(AtomicBool);
 
 impl AtomicOwnership {

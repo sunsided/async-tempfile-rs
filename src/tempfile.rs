@@ -513,9 +513,13 @@ impl TempFile {
     /// on the `unlink` syscall.
     ///
     /// If other clones still reference the file, cleanup is left to them and
-    /// `Ok(())` is returned. On error the file is left in place and the
-    /// synchronous `Drop` remains armed as a backstop, so it will retry the
-    /// removal; the returned `Err` is purely informational.
+    /// `Ok(())` is returned. On error the file is left in place and the error is
+    /// returned; no further automatic deletion is attempted (a synchronous retry
+    /// of the same failing syscall would be pointless), so the caller owns the
+    /// file and may inspect, retry, or remove it. This differs from
+    /// [`drop_async`](Self::drop_async), whose synchronous `Drop` backstop is a
+    /// genuinely different deletion mechanism after a possibly-cancelled async
+    /// removal.
     ///
     /// ## Example
     ///
@@ -547,9 +551,13 @@ impl TempFile {
             match std::fs::remove_file(&core.path) {
                 Ok(()) => core.ownership.set_borrowed(),
                 Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
-                // Leave armed: dropping `core` below lets `Drop` retry removal.
-                // The error is still surfaced to the caller.
-                Err(e) => return Err(e),
+                // Disarm and surface the error: leaving `core` armed would make
+                // the trailing `Drop` retry the identical syscall for nothing.
+                // The file is left in place for the caller to handle.
+                Err(e) => {
+                    core.ownership.set_borrowed();
+                    return Err(e);
+                }
             }
         }
 
