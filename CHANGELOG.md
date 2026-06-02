@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 This project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] - 2026-06-02
+## [0.8.0] - 2026-06-03
 
 [0.8.0]: https://github.com/sunsided/async-tempfile-rs/releases/tag/v0.8.0
 
