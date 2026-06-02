@@ -1,39 +1,6 @@
-//! # async-tempfile
-//!
-//! Provides the [`TempFile`] struct, an asynchronous wrapper based on `tokio::fs` for temporary
-//! files that will be automatically deleted when the last reference to the struct is dropped.
-//!
-//! ```
-//! use async_tempfile::TempFile;
-//!
-//! #[tokio::main]
-//! async fn main() {
-//!     let parent = TempFile::new().await.unwrap();
-//!
-//!     // The cloned reference will not delete the file when dropped.
-//!     {
-//!         let nested = parent.open_rw().await.unwrap();
-//!         assert_eq!(nested.file_path(), parent.file_path());
-//!         assert!(nested.file_path().is_file());
-//!     }
-//!
-//!     // The file still exists; it will be deleted when `parent` is dropped.
-//!     assert!(parent.file_path().is_file());
-//! }
-//! ```
-//!
-//! ## Features
-//!
-//! * `uuid` - (Default) Enables random file name generation based on the [`uuid`](https://crates.io/crates/uuid) crate.
-//!            Provides the `new` and `new_in`, as well as the `new_with_uuid*` group of methods.
-
-// Document crate features on docs.rs.
-#![cfg_attr(docsrs, feature(doc_cfg))]
-// Required for dropping the file.
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
-use std::io::{IoSlice, SeekFrom};
-use std::mem::ManuallyDrop;
+use std::io::{ErrorKind, IoSlice, SeekFrom};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -44,23 +11,45 @@ use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 #[cfg(not(feature = "uuid"))]
 use crate::random_name::RandomName;
-use crate::Error;
-use crate::Ownership;
+use crate::{AtomicOwnership, Error, Ownership};
 #[cfg(feature = "uuid")]
 use uuid::Uuid;
 
-const FILE_PREFIX: &str = "atmp_";
+pub(crate) const FILE_PREFIX: &str = "atmp_";
+
+/// Maximum number of attempts to find a free name when creating a file with a
+/// randomly generated, collision-resistant name.
+const MAX_NAME_ATTEMPTS: usize = 16;
+
+/// How the underlying file should be opened or created.
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum CreateMode {
+    /// Create a brand-new file, failing if it already exists (`O_EXCL`).
+    /// Used for unpredictable, auto-generated names to avoid clobbering an
+    /// existing file or following a planted symlink.
+    Exclusive,
+    /// Create the file, or open it if it already exists. Used for user-supplied
+    /// names, preserving historic behavior.
+    CreateOrOpen,
+    /// Open an existing file without creating it. Used by `from_existing`.
+    OpenExisting,
+}
 
 /// A named temporary file that will be cleaned automatically
 /// after the last reference to it is dropped.
 pub struct TempFile {
     /// A local reference to the file. Used to write to or read from the file.
-    file: ManuallyDrop<File>,
+    ///
+    /// Field order matters: `file` is declared before `core` so that this local
+    /// handle is dropped (closed) before the shared `core` is released and the
+    /// file is deleted. Required for correct deletion on Windows, which refuses
+    /// to delete a file while a handle to it is open.
+    file: File,
 
     /// A shared pointer to the owned (or non-owned) file.
     /// The `Arc` ensures that the enclosed file is kept alive
     /// until all references to it are dropped.
-    core: ManuallyDrop<Arc<TempFileCore>>,
+    core: Arc<TempFileCore>,
 }
 
 /// The instance that tracks the temporary file.
@@ -69,13 +58,10 @@ struct TempFileCore {
     /// The path of the contained file.
     path: PathBuf,
 
-    /// Pointer to the file to keep it alive.
-    file: ManuallyDrop<File>,
-
-    /// A hacky approach to allow for "non-owned" files.
-    /// If set to `Ownership::Owned`, the file specified in `path` will be deleted
-    /// when this instance is dropped. If set to `Ownership::Borrowed`, the file will be kept.
-    ownership: Ownership,
+    /// Whether the file specified in `path` is owned (and deleted on drop) or
+    /// merely borrowed. Stored atomically because it is read from `Drop`, which
+    /// must never block on a lock, and mutated by `keep`/`persist`/`drop_async`.
+    ownership: AtomicOwnership,
 }
 
 impl TempFile {
@@ -119,7 +105,7 @@ impl TempFile {
     /// # use async_tempfile::{TempFile, Error};
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
-    /// let file = TempFile::new_with_name("temporary.file").await?;
+    /// let file = TempFile::new_with_name("new_with_name_example.file").await?;
     ///
     /// // The file exists.
     /// let file_path = file.file_path().clone();
@@ -174,6 +160,9 @@ impl TempFile {
     /// Creates a new temporary file in the specified location.
     /// When the instance goes out of scope, the file will be deleted.
     ///
+    /// The file is created with a collision-resistant, unpredictable name using
+    /// an exclusive (`O_EXCL`) create, so it never clobbers an existing file.
+    ///
     /// ## Crate Features
     ///
     /// * `uuid` - When the `uuid` crate feature is enabled, a random UUIDv4 is used to
@@ -204,17 +193,7 @@ impl TempFile {
     /// # Ok::<(), Error>(())
     /// # });
     pub async fn new_in<P: Borrow<Path>>(dir: P) -> Result<Self, Error> {
-        #[cfg(feature = "uuid")]
-        {
-            let id = Uuid::new_v4();
-            Self::new_with_uuid_in(id, dir).await
-        }
-
-        #[cfg(not(feature = "uuid"))]
-        {
-            let name = RandomName::new(FILE_PREFIX);
-            Self::new_with_name_in(name, dir).await
-        }
+        Self::create_with_affixes(dir.borrow(), FILE_PREFIX, "").await
     }
 
     /// Creates a new temporary file in the specified location.
@@ -232,7 +211,7 @@ impl TempFile {
     /// # use tokio::fs;
     /// # let _ = tokio_test::block_on(async {
     /// let path = std::env::temp_dir();
-    /// let file = TempFile::new_with_name_in("temporary.file", path).await?;
+    /// let file = TempFile::new_with_name_in("new_with_name_in_example.file", path).await?;
     ///
     /// // The file exists.
     /// let file_path = file.file_path().clone();
@@ -254,10 +233,8 @@ impl TempFile {
         if !dir.is_dir() {
             return Err(Error::InvalidDirectory);
         }
-        let file_name = name.as_ref();
-        let mut path = PathBuf::from(dir);
-        path.push(file_name);
-        Self::new_internal(path, Ownership::Owned).await
+        let path = dir.join(name.as_ref());
+        Self::new_internal(path, Ownership::Owned, CreateMode::CreateOrOpen).await
     }
 
     /// Creates a new temporary file in the specified location.
@@ -293,7 +270,7 @@ impl TempFile {
     #[cfg_attr(docsrs, doc(cfg(feature = "uuid")))]
     #[cfg(feature = "uuid")]
     pub async fn new_with_uuid_in<P: Borrow<Path>>(uuid: Uuid, dir: P) -> Result<Self, Error> {
-        let file_name = format!("{}{}", FILE_PREFIX, uuid);
+        let file_name = format!("{FILE_PREFIX}{uuid}");
         Self::new_with_name_in(file_name, dir).await
     }
 
@@ -312,7 +289,31 @@ impl TempFile {
         if !path.borrow().is_file() {
             return Err(Error::InvalidFile);
         }
-        Self::new_internal(path, ownership).await
+        Self::new_internal(path, ownership, CreateMode::OpenExisting).await
+    }
+
+    /// Creates a builder for configuring a new temporary file
+    /// (prefix, suffix, directory) before creating it.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempFile, Error};
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::builder()
+    ///     .prefix("log_")
+    ///     .suffix(".txt")
+    ///     .create()
+    ///     .await?;
+    ///
+    /// let name = file.file_path().file_name().unwrap().to_string_lossy().into_owned();
+    /// assert!(name.starts_with("log_"));
+    /// assert!(name.ends_with(".txt"));
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn builder() -> crate::TempFileBuilder {
+        crate::TempFileBuilder::new()
     }
 
     /// Returns the path of the underlying temporary file.
@@ -328,8 +329,8 @@ impl TempFile {
             .open(&self.core.path)
             .await?;
         Ok(TempFile {
+            file,
             core: self.core.clone(),
-            file: ManuallyDrop::new(file),
         })
     }
 
@@ -341,19 +342,18 @@ impl TempFile {
             .open(&self.core.path)
             .await?;
         Ok(TempFile {
+            file,
             core: self.core.clone(),
-            file: ManuallyDrop::new(file),
         })
     }
 
     /// Creates a new TempFile instance that shares the same underlying
     /// file handle as the existing TempFile instance.
     /// Reads, writes, and seeks will affect both TempFile instances simultaneously.
-    #[allow(dead_code)]
     pub async fn try_clone(&self) -> Result<TempFile, Error> {
         Ok(TempFile {
+            file: self.file.try_clone().await?,
             core: self.core.clone(),
-            file: ManuallyDrop::new(self.file.try_clone().await?),
         })
     }
 
@@ -369,12 +369,84 @@ impl TempFile {
     /// # });
     /// ```
     pub fn ownership(&self) -> Ownership {
-        self.core.ownership
+        self.core.ownership.get()
+    }
+
+    /// Disables automatic deletion and returns the path of the underlying file,
+    /// turning the temporary file into a permanent one.
+    ///
+    /// This affects every clone that shares the same underlying file: none of
+    /// them will delete it when dropped.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempFile, Error};
+    /// # use tokio::fs;
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// let path = file.keep();
+    ///
+    /// // The file still exists after the handle is dropped.
+    /// assert!(fs::metadata(path.clone()).await.is_ok());
+    /// # fs::remove_file(path).await.ok();
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub fn keep(self) -> PathBuf {
+        let path = self.core.path.clone();
+        self.core.ownership.set_borrowed();
+        path
+    }
+
+    /// Persists the temporary file by moving it to `target`, returning the new
+    /// path. The file will no longer be deleted automatically.
+    ///
+    /// The move is performed with [`tokio::fs::rename`] and therefore must stay
+    /// on the same filesystem (a cross-device move returns an I/O error).
+    ///
+    /// This is cancellation- and panic-safe: deletion is only disabled *after*
+    /// the rename succeeds, so if the future is dropped or the rename fails, the
+    /// original temporary file is still cleaned up.
+    ///
+    /// ## Arguments
+    ///
+    /// * `target` - The destination path to move the file to.
+    ///
+    /// ## Example
+    ///
+    /// ```
+    /// # use async_tempfile::{TempFile, Error};
+    /// # use tokio::fs;
+    /// # let _ = tokio_test::block_on(async {
+    /// let file = TempFile::new().await?;
+    /// let target = std::env::temp_dir().join("persisted_async_tempfile.txt");
+    ///
+    /// let path = file.persist(&target).await?;
+    /// assert!(fs::metadata(path.clone()).await.is_ok());
+    /// # fs::remove_file(path).await.ok();
+    /// # Ok::<(), Error>(())
+    /// # });
+    /// ```
+    pub async fn persist<P: AsRef<Path>>(self, target: P) -> Result<PathBuf, Error> {
+        let target = target.as_ref().to_path_buf();
+        // Backstop ordering: rename first, disarm only on success. If the rename
+        // fails or this future is cancelled, `self` is dropped and its `Drop`
+        // deletes the original temporary file. The persisted target is never
+        // touched by `Drop`, which only ever removes the core's own `path`.
+        tokio::fs::rename(&self.core.path, &target).await?;
+        self.core.ownership.set_borrowed();
+        Ok(target)
     }
 
     /// Asynchronously drops the TempFile, ensuring any resources are properly released.
     /// This is useful for explicitly managing the lifecycle of the TempFile
     /// in an asynchronous context.
+    ///
+    /// When this is the last reference to an owned file, the file is removed via
+    /// [`tokio::fs::remove_file`] without blocking the runtime. The synchronous
+    /// `Drop` remains armed as a backstop, so a cancelled or panicking
+    /// `drop_async` still cleans up the file.
     ///
     /// ## Example
     ///
@@ -392,29 +464,104 @@ impl TempFile {
     /// # });
     /// ```
     pub async fn drop_async(self) {
-        tokio::task::spawn_blocking(move || drop(self)).await.ok();
+        let TempFile { file, core } = self;
+        // Close the local read-write handle before attempting deletion.
+        drop(file);
+
+        // Only the sole owner removes the file asynchronously; otherwise the
+        // remaining references' `Drop` impls handle cleanup.
+        let Some(core) = Arc::into_inner(core) else {
+            return;
+        };
+
+        if core.ownership.is_owned() {
+            // `core` is still marked owned here. If this future is cancelled or
+            // panics at the await point, `core` is dropped and its synchronous
+            // `Drop` deletes the file. We disarm only after a confirmed removal.
+            match tokio::fs::remove_file(&core.path).await {
+                Ok(()) => core.ownership.set_borrowed(),
+                Err(e) if e.kind() == ErrorKind::NotFound => core.ownership.set_borrowed(),
+                // Leave armed: the synchronous `Drop` below retries the removal.
+                Err(_) => {}
+            }
+        }
+
+        drop(core);
     }
 
-    async fn new_internal<P: Borrow<Path>>(path: P, ownership: Ownership) -> Result<Self, Error> {
+    /// Creates a file named `{prefix}{random}{suffix}` with an unpredictable,
+    /// collision-resistant random core, using an exclusive (`O_EXCL`) create and
+    /// retrying on the (astronomically unlikely) collision. Shared by `new_in`
+    /// and [`crate::TempFileBuilder`].
+    pub(crate) async fn create_with_affixes(
+        dir: &Path,
+        prefix: &str,
+        suffix: &str,
+    ) -> Result<Self, Error> {
+        if !dir.is_dir() {
+            return Err(Error::InvalidDirectory);
+        }
+        let mut last_err = None;
+        for _ in 0..MAX_NAME_ATTEMPTS {
+            let name = format!("{prefix}{}{suffix}", Self::random_core_name());
+            match Self::new_internal(dir.join(name), Ownership::Owned, CreateMode::Exclusive).await
+            {
+                Ok(file) => return Ok(file),
+                Err(Error::Io(e)) if e.kind() == ErrorKind::AlreadyExists => {
+                    last_err = Some(Error::Io(e));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_err.unwrap_or(Error::InvalidFile))
+    }
+
+    /// Generates the unpredictable, collision-resistant random core of a name,
+    /// without any prefix or suffix.
+    fn random_core_name() -> String {
+        #[cfg(feature = "uuid")]
+        {
+            Uuid::new_v4().to_string()
+        }
+
+        #[cfg(not(feature = "uuid"))]
+        {
+            RandomName::new("").as_str().to_string()
+        }
+    }
+
+    async fn new_internal<P: Borrow<Path>>(
+        path: P,
+        ownership: Ownership,
+        mode: CreateMode,
+    ) -> Result<Self, Error> {
         let path = path.borrow();
 
+        // A single read-write handle both creates (per `mode`) and serves the
+        // file. Keeping just this one handle alive holds the inode open for the
+        // lifetime of the (shared) core, so no separate keep-alive handle is
+        // needed - that only wasted a file descriptor per file.
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        match mode {
+            CreateMode::Exclusive => {
+                options.create_new(true);
+            }
+            CreateMode::CreateOrOpen => {
+                options.create(true);
+            }
+            CreateMode::OpenExisting => {}
+        }
+
+        let file = options.open(path).await?;
         let core = TempFileCore {
-            file: ManuallyDrop::new(
-                OpenOptions::new()
-                    .create(ownership == Ownership::Owned)
-                    .read(false)
-                    .write(true)
-                    .open(path)
-                    .await?,
-            ),
-            ownership,
+            ownership: AtomicOwnership::new(ownership),
             path: PathBuf::from(path),
         };
 
-        let file = OpenOptions::new().read(true).write(true).open(path).await?;
         Ok(Self {
-            file: ManuallyDrop::new(file),
-            core: ManuallyDrop::new(Arc::new(core)),
+            file,
+            core: Arc::new(core),
         })
     }
 
@@ -425,32 +572,23 @@ impl TempFile {
     }
 }
 
-/// Ensures the file handles are closed before the core reference is freed.
-/// If the core reference would be freed while handles are still open, it is
-/// possible that the underlying file cannot be deleted.
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        // Ensure all file handles are closed before we attempt to delete the file itself via core.
-        drop(unsafe { ManuallyDrop::take(&mut self.file) });
-        drop(unsafe { ManuallyDrop::take(&mut self.core) });
-    }
-}
-
 /// Ensures that the underlying file is deleted if this is an owned instance.
 /// If the underlying file is not owned, this operation does nothing.
 impl Drop for TempFileCore {
     fn drop(&mut self) {
-        // Ensure we don't drop borrowed files.
-        if self.ownership != Ownership::Owned {
+        // Ensure we don't drop borrowed files. Read via the lock-free atomic:
+        // `Drop` may run on a runtime worker thread and must never block.
+        if !self.ownership.is_owned() {
             return;
         }
 
-        // Closing the file handle first, as otherwise the file might not be deleted.
-        drop(unsafe { ManuallyDrop::take(&mut self.file) });
-
-        // TODO: Use asynchronous variant if running in an async context.
-        // Note that if TempFile is used from the executor's handle,
-        //      this may block the executor itself.
+        // The owning `TempFile`'s handle (declared before `core`) has already
+        // been closed by the time this runs, so the file can be deleted even on
+        // platforms that lock open files (Windows).
+        //
+        // Synchronous on purpose: `Drop` must not re-enter the async runtime, as
+        // it may run on a runtime worker thread. Use `drop_async` for an async
+        // deletion path at an explicit await point.
         let _ = std::fs::remove_file(&self.path);
     }
 }
@@ -508,21 +646,21 @@ impl AsyncWrite for TempFile {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<Result<usize, std::io::Error>> {
-        Pin::new(self.file.deref_mut()).poll_write(cx, buf)
+        Pin::new(&mut self.file).poll_write(cx, buf)
     }
 
     fn poll_flush(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(self.file.deref_mut()).poll_flush(cx)
+        Pin::new(&mut self.file).poll_flush(cx)
     }
 
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(self.file.deref_mut()).poll_shutdown(cx)
+        Pin::new(&mut self.file).poll_shutdown(cx)
     }
 
     fn poll_write_vectored(
@@ -530,29 +668,29 @@ impl AsyncWrite for TempFile {
         cx: &mut Context<'_>,
         bufs: &[IoSlice<'_>],
     ) -> Poll<Result<usize, std::io::Error>> {
-        Pin::new(self.file.deref_mut()).poll_write_vectored(cx, bufs)
+        Pin::new(&mut self.file).poll_write_vectored(cx, bufs)
     }
 }
 
-/// Forwarding AsyncWrite to the embedded TempFile
+/// Forwarding AsyncRead to the embedded File
 impl AsyncRead for TempFile {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        Pin::new(self.file.deref_mut()).poll_read(cx, buf)
+        Pin::new(&mut self.file).poll_read(cx, buf)
     }
 }
 
 /// Forwarding AsyncSeek to the embedded File
 impl AsyncSeek for TempFile {
     fn start_seek(mut self: Pin<&mut Self>, position: SeekFrom) -> std::io::Result<()> {
-        Pin::new(self.file.deref_mut()).start_seek(position)
+        Pin::new(&mut self.file).start_seek(position)
     }
 
     fn poll_complete(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<u64>> {
-        Pin::new(self.file.deref_mut()).poll_complete(cx)
+        Pin::new(&mut self.file).poll_complete(cx)
     }
 }
 
